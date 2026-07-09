@@ -266,3 +266,52 @@ export const ENABLE_SENSITIVE_FILE_CHECK = false;
 
 /** Profondità massima di nesting prima di considerare il comando offuscato. */
 export const MAX_NESTING_DEPTH = 5;
+
+// ─── Protezione path in scrittura ────────────────────────────────────────────
+
+/**
+ * Path (relativi alla working directory) protetti dalla scrittura: nessuno
+ * strumento di scrittura (write/edit/apply_patch) né comando bash deve
+ * modificarli, sovrascriverli o crearli. Pensati per asset immutabili come le
+ * guardie SDD (docs/specs/guards). Il match è per prefisso normalizzato contro
+ * il cwd: qualunque path che risolva sotto uno di questi viene bloccato.
+ */
+export const WRITE_PROTECTED_PATHS: readonly string[] = ["docs/specs/guards"];
+
+/**
+ * Se `true`, attiva la protezione in scrittura dei path in
+ * WRITE_PROTECTED_PATHS sia per i tool di scrittura che per i comandi bash.
+ */
+export const ENABLE_WRITE_PROTECTION = true;
+
+/**
+ * Comandi bash che scrivono/sovrascrivono/modificano file: i loro argomenti
+ * path vengono validati contro WRITE_PROTECTED_PATHS. Il controllo è su tutti
+ * gli argomenti non-flag (conservativo: blocca anche se il path protetto è la
+ * sorgente di una `cp`, per stare sul sicuro).
+ */
+export const WRITE_COMMANDS: ReadonlySet<string> = new Set([
+	"cp",
+	"mv",
+	"install",
+	"tee",
+	"truncate",
+	"dd",
+	"chmod",
+	"chown",
+	"chgrp",
+	"ln",
+]);
+
+/**
+ * Operatori di redirect che scrivono su file: il token immediatamente
+ * successivo è il path di destinazione e va protetto.
+ */
+export const WRITE_REDIRECT_OPERATORS: ReadonlySet<string> = new Set([
+	">",
+	">>",
+	"2>",
+	"2>>",
+	"&>",
+	"&>>",
+]);

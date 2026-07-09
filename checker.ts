@@ -17,6 +17,7 @@ import {
 	DOCKER_DESTRUCTIVE_SUBCOMMANDS,
 	ENABLE_GIT_ADD_COMMIT_BLOCK,
 	ENABLE_SENSITIVE_FILE_CHECK,
+	ENABLE_WRITE_PROTECTION,
 	FILE_READING_COMMANDS,
 	FIND_EXEC_FLAGS,
 	MAX_NESTING_DEPTH,
@@ -26,6 +27,9 @@ import {
 	SHELL_COMMANDS,
 	SHELL_OPERATORS,
 	WRAPPER_COMMANDS,
+	WRITE_COMMANDS,
+	WRITE_PROTECTED_PATHS,
+	WRITE_REDIRECT_OPERATORS,
 } from "./config";
 
 export interface CheckResult {
@@ -81,6 +85,44 @@ function isOutsideCwd(p: string, cwd: string): CheckResult {
 	);
 }
 
+/**
+ * `true` se `p` risolve sotto uno dei path protetti in scrittura
+ * (WRITE_PROTECTED_PATHS). Combina match letterale (cattura path con
+ * variabili/glob irrisolvibili ma col prefisso protetto) e match risolto
+ * (path relativi/assoluti normalizzati contro il cwd).
+ */
+export function isUnderProtected(p: string, cwd: string): boolean {
+	if (!ENABLE_WRITE_PROTECTION || WRITE_PROTECTED_PATHS.length === 0) return false;
+
+	const expanded = expandTilde(p);
+
+	for (const base of WRITE_PROTECTED_PATHS) {
+		if (
+			expanded === base ||
+			expanded.startsWith(`${base}/`) ||
+			expanded.startsWith(`./${base}`) ||
+			expanded.endsWith(`/${base}`) ||
+			expanded.includes(`/${base}/`)
+		) {
+			return true;
+		}
+	}
+
+	const resolved = resolvePath(p, cwd);
+	if (resolved !== null) {
+		for (const base of WRITE_PROTECTED_PATHS) {
+			const baseResolved = resolvePath(base, cwd);
+			if (
+				baseResolved !== null &&
+				(resolved === baseResolved || resolved.startsWith(`${baseResolved}/`))
+			) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
 // ─── Checker ricorsivo ────────────────────────────────────────────────────────
 
 export function checkTokens(tokens: string[], cwd: string, depth = 0): CheckResult {
@@ -95,6 +137,14 @@ export function checkTokens(tokens: string[], cwd: string, depth = 0): CheckResu
 		const token = tokens[i];
 
 		if (!token || SHELL_OPERATORS.has(token)) {
+			if (ENABLE_WRITE_PROTECTION && WRITE_REDIRECT_OPERATORS.has(token)) {
+				const target = tokens[i + 1];
+				if (target && isUnderProtected(target, cwd)) {
+					return block(
+						`redirect verso path protetto in scrittura: ${JSON.stringify(target)}`,
+					);
+				}
+			}
 			i++;
 			continue;
 		}
@@ -199,8 +249,21 @@ export function checkTokens(tokens: string[], cwd: string, depth = 0): CheckResu
 		}
 
 		if (PATH_SENSITIVE_COMMANDS.has(token)) {
+			if (ENABLE_WRITE_PROTECTION) {
+				const rp = checkProtectedTargets(tokens, i, cwd);
+				if (rp.dangerous) return rp;
+			}
 			const r = checkPathSensitive(tokens, i, token, cwd);
 			if (r.dangerous) return r;
+			i++;
+			continue;
+		}
+
+		if (WRITE_COMMANDS.has(token)) {
+			if (ENABLE_WRITE_PROTECTION) {
+				const rp = checkProtectedTargets(tokens, i, cwd);
+				if (rp.dangerous) return rp;
+			}
 			i++;
 			continue;
 		}
@@ -399,6 +462,31 @@ function checkPathSensitive(
 			return block(
 				`${JSON.stringify(token)} bersaglia un path fuori dalla working directory — ${r.reason}`,
 			);
+		}
+		j++;
+	}
+	return SAFE;
+}
+
+/**
+ * Controlla gli argomenti path di un comando di scrittura (cp/mv/chmod/...):
+ * blocca se uno qualsiasi risolve sotto un path protetto (WRITE_PROTECTED_PATHS).
+ */
+function checkProtectedTargets(tokens: string[], i: number, cwd: string): CheckResult {
+	let j = i + 1;
+	while (j < tokens.length) {
+		const arg = tokens[j];
+		if (!arg || SHELL_OPERATORS.has(arg)) break;
+		if (arg === "--") {
+			j++;
+			continue;
+		}
+		if (arg.startsWith("-")) {
+			j++;
+			continue;
+		}
+		if (isUnderProtected(arg, cwd)) {
+			return block(`comando bersaglia un path protetto in scrittura: ${JSON.stringify(arg)}`);
 		}
 		j++;
 	}

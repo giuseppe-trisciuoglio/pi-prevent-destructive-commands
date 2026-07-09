@@ -6,7 +6,7 @@
  */
 
 import { tokenize } from "./tokenizer";
-import { checkTokens } from "./checker";
+import { checkTokens, isUnderProtected } from "./checker";
 
 const CWD = "/Volumes/Disco_Dati/project/demo";
 
@@ -102,6 +102,19 @@ const cases: Case[] = [
 	{ command: "ls -la", expectBlocked: false },
 	{ command: "echo $HOME", expectBlocked: false },
 	{ command: "mkdir -p dist/build", expectBlocked: false },
+	// Write-protection su docs/specs/guards (dentro cwd)
+	{ command: "echo x > docs/specs/guards/g.sh", expectBlocked: true, note: "redirect su path protetto" },
+	{ command: "echo x >> docs/specs/guards/g.sh", expectBlocked: true, note: "append su path protetto" },
+	{ command: "cp a docs/specs/guards/g.sh", expectBlocked: true, note: "cp dest protetto" },
+	{ command: "mv a docs/specs/guards/", expectBlocked: true, note: "mv dest protetto" },
+	{ command: "chmod +x docs/specs/guards/g.sh", expectBlocked: true, note: "chmod su protetto" },
+	{ command: "tee docs/specs/guards/g.sh", expectBlocked: true, note: "tee su protetto" },
+	{ command: "rm docs/specs/guards/g.sh", expectBlocked: true, note: "rm su protetto (path-sensitive)" },
+	{ command: "rm ./docs/specs/guards/g.sh", expectBlocked: true, note: "rm con ./ prefisso" },
+	{ command: "ls docs/specs/guards", expectBlocked: false, note: "lettura permessa" },
+	{ command: "cat docs/specs/guards/g.sh", expectBlocked: false, note: "lettura permessa" },
+	{ command: "bash docs/specs/guards/g.sh", expectBlocked: false, note: "esecuzione permessa" },
+	{ command: "echo x > dist/build.js", expectBlocked: false, note: "redirect fuori dai protetti" },
 ];
 
 let passed = 0;
@@ -122,6 +135,31 @@ for (const c of cases) {
 		`${status}  [${tag}]  ${c.command}${note}${reason}`,
 	);
 }
+
+// ── isUnderProtected: casistica path (tool write/edit/apply_patch) ──
+const protectedCases: { path: string; expect: boolean; note?: string }[] = [
+	{ path: "docs/specs/guards/g.sh", expect: true },
+	{ path: "./docs/specs/guards/g.sh", expect: true },
+	{ path: "docs/specs/guards", expect: true, note: "la directory stessa" },
+	{ path: "docs/specs/guards/sub/x.sh", expect: true, note: "sottopath" },
+	{ path: "$REPO/docs/specs/guards/x.sh", expect: true, note: "variabile + prefisso letterale" },
+	{ path: "libs/server/x.ts", expect: false, note: "non protetto" },
+	{ path: "docs/specs/altro.md", expect: false, note: "sorella non protetta" },
+	{ path: "dist/build.js", expect: false },
+];
+
+console.log("");
+for (const c of protectedCases) {
+	const got = isUnderProtected(c.path, CWD);
+	const ok = got === c.expect;
+	const status = ok ? "PASS" : "FAIL";
+	if (ok) passed++;
+	else failed++;
+	const note = c.note ? `  (${c.note})` : "";
+	console.log(`${status}  [protected]  ${c.path} -> ${got}${note}`);
+}
+
+console.log("");
 
 console.log("");
 console.log(`Risultato: ${passed} passati, ${failed} falliti su ${cases.length} casi.`);

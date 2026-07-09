@@ -22,6 +22,7 @@ Tutte le regole sono definite in [`config.ts`](./config.ts).
 | **Docker distruttivo** | `docker rm`/`rmi`, `docker container/image/volume/network rm`, `docker * prune`, `docker compose down -v`, `docker compose rm`, `docker context rm`, `docker swarm leave --force` |
 | **AWS CLI distruttivo** | `aws s3 rm`, `aws ec2 terminate-instances`, `aws rds delete-db-instance`, `aws cloudformation delete-stack`, ecc. (lista completa in `config.ts`) |
 | **Lettura file sensibili** | _Disattivato di default_ (`ENABLE_SENSITIVE_FILE_CHECK = false`). Quando attivo, blocca `cat`/`grep`/... su `.env`, chiavi SSH, `.pem`. Il substring matching originale è rumoroso in coding (`config` matcha `tsconfig`, `vite.config`), per questo parte spento |
+| **Scrittura su path protetti** | Blocca `write`/`edit`/`apply_patch` e comandi bash (`>`, `>>`, `cp`, `mv`, `chmod`, `tee`, `rm`, ...) su `docs/specs/guards` (e qualunque path in `WRITE_PROTECTED_PATHS`). Impedisce a un agente di neutralizzare le proprie guardie SDD. Lettura/esecuzione permesse |
 
 L'analisi è **ricorsiva**: attraversa `sudo`/`env`/`timeout`, `bash -c "..."`, `find
 -exec`, `xargs`/`parallel`, `watch`/`strace` e pipeline/concatenazioni (`|`, `&&`,
@@ -34,6 +35,7 @@ Come il plugin Claude originale, l'analisi è statica e quindi non copre tutto:
 - **Argomenti via stdin/pipe**: `echo x | xargs rm` non è bloccabile (gli argomenti di `rm` non sono visibili come token).
 - **`cd` nel comando**: `cd /; rm etc/passwd` viene valutato contro il cwd di pi, non contro `/`. In pi l'agente raramente fa `cd` (il cwd è già il progetto), quindi il rischio è basso.
 - **Sotto-comandi non in blacklist**: l'estensione copre i pattern noti; un wrapper sconosciuto o un tool custom distruttivo non viene intercettato.
+- **`sed -i` via pipe/xargs**: `sed -i` su un path protetto è bloccato se appare come argomento diretto del comando, ma se il path arriva via stdin/pipe (`echo x | xargs sed -i`) non è visibile all'analisi statica, come già accade per `rm`.
 
 ## Comportamento
 
@@ -48,6 +50,8 @@ Modifica le costanti in [`config.ts`](./config.ts):
 - `ENABLE_GIT_ADD_COMMIT_BLOCK` (default `true`) — blocca `git add`/`commit`.
   Metti `false` se vuoi permettere all'agente di creare commit.
 - `ENABLE_SENSITIVE_FILE_CHECK` (default **`false`**) — blocca la lettura di file sensibili. Disattivato di default per via dei falsi positivi del substring matching (`config` → `tsconfig`, `vite.config`; `.env` → `.environment.ts`). Riattivalo solo se ti serve e considera di affinare `SENSITIVE_FILE_PATTERNS` (ad es. rimuovendo `config`/`secret` generici e tenendo solo le forme con estensione).
+- `ENABLE_WRITE_PROTECTION` (default `true`) — blocca le scritture sui path in `WRITE_PROTECTED_PATHS` (tool `write`/`edit`/`apply_patch` e comandi bash con redirect/`cp`/`mv`/`chmod`/...). Pensato per custodire asset immutabili come le guardie SDD.
+- `WRITE_PROTECTED_PATHS` (default `["docs/specs/guards"]`) — path relativi al cwd protetti dalla scrittura. Aggiungi qui altri asset immutabili del progetto.
 - Aggiungi/rimuovi pattern da `SENSITIVE_FILE_PATTERNS` o voci dai set di AWS/Docker.
 
 Dopo ogni modifica: `/reload`.
@@ -59,7 +63,7 @@ prevent-destructive-commands/
 ├── index.ts       # factory + hook tool_call (entry point)
 ├── config.ts      # blacklists e flag di comportamento
 ├── tokenizer.ts   # tokenizer shell (shlex-like)
-├── checker.ts     # analizzatore ricorsivo
+├── checker.ts     # analizzatore ricorsivo + isUnderProtected
 └── README.md
 ```
 
