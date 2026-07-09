@@ -309,9 +309,6 @@ function checkDocker(tokens: string[], i: number): CheckResult {
 	}
 	if (sub1 === "compose" && i + 2 < tokens.length) {
 		const composeSub = tokens[i + 2];
-		if (composeSub === "down" && rest.includes("-v")) {
-			return block("docker compose down -v rimuove i volume con rischio di perdita dati");
-		}
 		if (composeSub === "rm") {
 			return block("docker compose rm rimuove i container fermati");
 		}

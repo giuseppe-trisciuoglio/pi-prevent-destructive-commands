@@ -173,6 +173,7 @@ export const DOCKER_DESTRUCTIVE_COMPOUND: ReadonlySet<string> = new Set([
 	"network prune",
 	"system prune",
 	"builder prune",
+	"compose down",
 ]);
 
 /**

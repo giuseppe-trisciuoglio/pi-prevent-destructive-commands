@@ -61,8 +61,8 @@ const cases: Case[] = [
 	{ command: "docker container rm abc", expectBlocked: true },
 	{ command: "docker volume prune", expectBlocked: true },
 	{ command: "docker system prune -af", expectBlocked: true },
-	{ command: "docker compose down -v", expectBlocked: true },
-	{ command: "docker compose down", expectBlocked: false },
+	{ command: "docker compose down -v", expectBlocked: true, note: "compose down -v" },
+	{ command: "docker compose down", expectBlocked: true, note: "compose down sempre bloccato" },
 	{ command: "docker ps", expectBlocked: false },
 	// AWS
 	{ command: "aws s3 rm s3://bucket/key", expectBlocked: true },

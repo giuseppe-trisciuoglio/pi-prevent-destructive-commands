@@ -19,7 +19,7 @@ Tutte le regole sono definite in [`config.ts`](./config.ts).
 | **Git distruttivo** | `git reset --hard`, `git clean`, `git push --force` / `-f` / `--delete`, `git branch -D`, `git tag -d`, `git checkout -f`, `git rebase`, `git filter-branch`, `git filter-repo`, `git reflog expire`, `git update-ref -d` |
 | **Git add/commit** | `git add`, `git commit` (vedi flag `ENABLE_GIT_ADD_COMMIT_BLOCK`) |
 | **rm / path-sensitive** | `rm`/`rmdir`/`shred`/`unlink` su target **fuori** dalla working directory (es. `/etc`, `~`, `..`). I target dentro la cwd sono permessi |
-| **Docker distruttivo** | `docker rm`/`rmi`, `docker container/image/volume/network rm`, `docker * prune`, `docker compose down -v`, `docker compose rm`, `docker context rm`, `docker swarm leave --force` |
+| **Docker distruttivo** | `docker rm`/`rmi`, `docker container/image/volume/network rm`, `docker * prune`, `docker compose down`, `docker compose rm`, `docker context rm`, `docker swarm leave --force` |
 | **AWS CLI distruttivo** | `aws s3 rm`, `aws ec2 terminate-instances`, `aws rds delete-db-instance`, `aws cloudformation delete-stack`, ecc. (lista completa in `config.ts`) |
 | **Lettura file sensibili** | _Disattivato di default_ (`ENABLE_SENSITIVE_FILE_CHECK = false`). Quando attivo, blocca `cat`/`grep`/... su `.env`, chiavi SSH, `.pem`. Il substring matching originale è rumoroso in coding (`config` matcha `tsconfig`, `vite.config`), per questo parte spento |
 | **Scrittura su path protetti** | Blocca `write`/`edit`/`apply_patch` e comandi bash (`>`, `>>`, `cp`, `mv`, `chmod`, `tee`, `rm`, ...) su `docs/specs/guards` (e qualunque path in `WRITE_PROTECTED_PATHS`). Impedisce a un agente di neutralizzare le proprie guardie SDD. Lettura/esecuzione permesse |
