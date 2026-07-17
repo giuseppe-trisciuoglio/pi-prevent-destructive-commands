@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- Reorganized source files into `src/` and tests into `test/`.
+- Split `checker.ts` into a slim recursive dispatcher plus per-category rule handlers under `src/rules/` (`git.ts`, `docker.ts`, `aws.ts`, `file-reading.ts`, `path-sensitive.ts`, `path-utils.ts`, `types.ts`). No behavior changes.
+
 ## [1.0.0] - 2025-07-16
 
 ### Added

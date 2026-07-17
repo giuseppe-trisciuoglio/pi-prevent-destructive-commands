@@ -31,7 +31,7 @@
     "node": ">=18.0.0"
   },
   "scripts": {
-    "test": "npx tsx smoke-test.ts",
+    "test": "npx tsx test/smoke-test.ts",
     "lint": "tsc --noEmit",
     "typecheck": "tsc --noEmit"
   },
@@ -47,7 +47,7 @@
     "displayName": "Prevent Destructive Commands",
     "description": "Blocks destructive bash commands (rm, git reset, docker rm, AWS delete, etc.) before execution.",
     "category": "security",
-    "entryPoint": "./index.ts",
+    "entryPoint": "./src/index.ts",
     "permissions": [
       "tool_call:bash"
     ]
