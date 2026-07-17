@@ -235,6 +235,12 @@ export const FIND_EXEC_FLAGS: ReadonlySet<string> = new Set([
 /**
  * Shell operators recognized as token separators by the tokenizer.
  * Must stay aligned with `tokenizer.ts`.
+ *
+ * `{` and `}` are deliberately excluded: forcing them to always split as
+ * standalone tokens broke the `find -exec ... {} \;` placeholder, which
+ * must survive tokenization as a single `"{}"` token (real shells only
+ * treat `{`/`}` specially as whitespace-delimited reserved words starting
+ * a compound command, not when glued together like this).
  */
 export const SHELL_OPERATORS: ReadonlySet<string> = new Set([
 	"|",
@@ -244,8 +250,6 @@ export const SHELL_OPERATORS: ReadonlySet<string> = new Set([
 	"&",
 	"(",
 	")",
-	"{",
-	"}",
 	">",
 	"<",
 	">>",
