@@ -59,6 +59,33 @@ const cases: Case[] = [
 	{ command: "rmdir /tmp/old", expectBlocked: true },
 	{ command: "shred ./secrets.txt", expectBlocked: false, note: "inside cwd" },
 
+	// ─── cd tracking ────────────────────────────────────────────────────────
+	{
+		command: "cd /; rm etc/passwd",
+		expectBlocked: true,
+		note: "cd shifts effective cwd to /, so etc/passwd resolves to /etc/passwd (outside real cwd)",
+	},
+	{
+		command: "cd /tmp && rm -rf secrets",
+		expectBlocked: true,
+		note: "cd shifts effective cwd to /tmp, target resolves outside real cwd",
+	},
+	{
+		command: "cd ..; rm secret.txt",
+		expectBlocked: true,
+		note: "cd .. moves effective cwd to the parent of the real cwd",
+	},
+	{
+		command: "cd ./dist && rm build.js",
+		expectBlocked: false,
+		note: "cd into a subdirectory of cwd: target still resolves inside the real cwd",
+	},
+	{
+		command: "cd \"$SOME_VAR\" && rm x",
+		expectBlocked: true,
+		note: "cd target is a variable: effective cwd becomes unresolvable, so subsequent rm is blocked conservatively",
+	},
+
 	// ─── Docker ───────────────────────────────────────────────────────────────
 	{ command: "docker rm abc", expectBlocked: true },
 	{ command: "docker rmi img:latest", expectBlocked: true },
@@ -88,8 +115,23 @@ const cases: Case[] = [
 	{ command: "find . -name x -delete", expectBlocked: false, note: "-delete not handled (inside cwd)" },
 	{
 		command: "echo foo | xargs rm",
+		expectBlocked: true,
+		note: "rm has no explicit target: real args arrive via stdin and can't be verified, so blocked conservatively",
+	},
+	{
+		command: "find . -name '*.log' | xargs rm",
+		expectBlocked: true,
+		note: "same as above: xargs delegate has no explicit target",
+	},
+	{
+		command: "cat ids.txt | xargs rm ./known-file.txt",
 		expectBlocked: false,
-		note: "static analysis limit: rm arguments come via stdin, not visible as tokens (consistent with Claude plugin behavior)",
+		note: "explicit target given, resolvable and inside cwd -- still verified normally",
+	},
+	{
+		command: "cat ids.txt | xargs rm /etc/passwd",
+		expectBlocked: true,
+		note: "explicit target given but outside cwd",
 	},
 	{ command: 'watch "rm /etc/passwd"', expectBlocked: true },
 

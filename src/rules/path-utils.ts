@@ -22,27 +22,45 @@ function hasUnresolvableParts(p: string): boolean {
 	return /\$[{(]?|\*|\?|\[/.test(p) || p === "{}";
 }
 
-function resolvePath(p: string, cwd: string): string | null {
+/**
+ * Resolves `p` to an absolute path. `resolveCwd` is the directory relative
+ * paths are resolved against — this is the *dynamic* cwd, which may have
+ * been shifted by a preceding `cd` in the same command chain (see
+ * `checker.ts`'s `currentCwd` tracking).
+ */
+export function resolvePath(p: string, resolveCwd: string): string | null {
 	const expanded = expandTilde(p);
 	if (hasUnresolvableParts(expanded)) return null;
 	if (isAbsolute(expanded)) return normalize(expanded);
-	return normalize(resolve(cwd, expanded));
+	return normalize(resolve(resolveCwd, expanded));
 }
 
-export function isOutsideCwd(p: string, cwd: string): CheckResult {
+/**
+ * Checks whether `p` falls outside the safe boundary directory.
+ *
+ * `resolveCwd` is used only to turn a relative `p` into an absolute path
+ * (it tracks `cd` within the command being analyzed); `boundaryCwd` is the
+ * fixed, real working directory the resulting absolute path must stay
+ * inside. They default to the same value when the command never `cd`s.
+ */
+export function isOutsideCwd(
+	p: string,
+	resolveCwd: string,
+	boundaryCwd: string = resolveCwd,
+): CheckResult {
 	if (hasUnresolvableParts(p)) {
 		return block(`unresolvable variable or glob in path: ${JSON.stringify(p)}`);
 	}
-	const resolved = resolvePath(p, cwd);
+	const resolved = resolvePath(p, resolveCwd);
 	if (resolved === null) {
 		return block(`cannot safely resolve path: ${JSON.stringify(p)}`);
 	}
-	const cwdRoot = cwd.replace(/\/+$/, "");
-	const cwdPrefix = `${cwdRoot}/`;
-	if (resolved === cwdRoot || `${resolved}/`.startsWith(cwdPrefix)) {
+	const boundaryRoot = boundaryCwd.replace(/\/+$/, "");
+	const boundaryPrefix = `${boundaryRoot}/`;
+	if (resolved === boundaryRoot || `${resolved}/`.startsWith(boundaryPrefix)) {
 		return SAFE;
 	}
 	return block(
-		`${JSON.stringify(resolved)} is outside the working directory ${JSON.stringify(cwd)}`,
+		`${JSON.stringify(resolved)} is outside the working directory ${JSON.stringify(boundaryCwd)}`,
 	);
 }

@@ -25,23 +25,98 @@ import { checkDocker } from "./rules/docker";
 import { checkFileReading } from "./rules/file-reading";
 import { checkGit } from "./rules/git";
 import { checkPathSensitive } from "./rules/path-sensitive";
+import { resolvePath } from "./rules/path-utils";
 import { type CheckResult, SAFE, block } from "./rules/types";
 
 export type { CheckResult };
 
-export function checkTokens(tokens: string[], cwd: string, depth = 0): CheckResult {
+/**
+ * @param cwd Directory relative paths resolve against for *this* call. At the top
+ *   level this is the real working directory; recursive calls pass the effective
+ *   `currentCwd` tracked at the point of recursion (see the `cd` handling below).
+ * @param depth Recursion guard against obfuscated nesting.
+ * @param stdinArgs `true` when this token list is the delegate of `xargs`/`parallel`:
+ *   a path-sensitive command with no explicit target here will receive its real
+ *   arguments from stdin at runtime, which static analysis cannot see.
+ * @param boundaryCwd The fixed, real working directory that resolved paths must stay
+ *   inside. Always the original top-level cwd, propagated unchanged through every
+ *   recursion level — unlike `cwd`, it never shifts because of a `cd` inside a nested
+ *   `bash -c`, `find -exec`, or `xargs` delegate.
+ */
+export function checkTokens(
+	tokens: string[],
+	cwd: string,
+	depth = 0,
+	stdinArgs = false,
+	boundaryCwd: string = cwd,
+): CheckResult {
 	if (depth > MAX_NESTING_DEPTH) {
 		return block(
 			"command nesting too deep to safely analyze (possible obfuscation)",
 		);
 	}
 
+	// Tracks the effective working directory as `cd` is encountered in this same
+	// command chain (e.g. `cd /; rm etc/passwd`). `null` means a preceding `cd`
+	// target could not be statically resolved, so the effective cwd is unknown.
+	let currentCwd: string | null = cwd;
+	const cwdStack: (string | null)[] = [];
+
 	let i = 0;
 	while (i < tokens.length) {
 		const token = tokens[i];
 
-		if (!token || SHELL_OPERATORS.has(token)) {
+		if (!token) {
 			i++;
+			continue;
+		}
+
+		// `(` / `)` scope a subshell: a `cd` inside it doesn't leak back out.
+		if (token === "(") {
+			cwdStack.push(currentCwd);
+			i++;
+			continue;
+		}
+		if (token === ")") {
+			currentCwd = cwdStack.length > 0 ? (cwdStack.pop() ?? cwd) : cwd;
+			i++;
+			continue;
+		}
+
+		if (SHELL_OPERATORS.has(token)) {
+			i++;
+			continue;
+		}
+
+		// `cd`: updates the effective cwd used to resolve relative paths for
+		// path-sensitive commands later in this same chain.
+		if (token === "cd") {
+			let j = i + 1;
+			let target: string | null = null;
+			let found = false;
+			while (j < tokens.length) {
+				const arg = tokens[j];
+				if (!arg || SHELL_OPERATORS.has(arg)) break;
+				if (arg.startsWith("-") && arg !== "-") {
+					j++;
+					continue;
+				}
+				target = arg;
+				found = true;
+				j++;
+				break;
+			}
+			if (currentCwd === null) {
+				// Already unknown — stays unknown.
+			} else if (!found) {
+				currentCwd = resolvePath("~", currentCwd);
+			} else if (target === "-") {
+				// `cd -` (previous directory): not statically knowable.
+				currentCwd = null;
+			} else if (target !== null) {
+				currentCwd = resolvePath(target, currentCwd);
+			}
+			i = j;
 			continue;
 		}
 
@@ -61,7 +136,7 @@ export function checkTokens(tokens: string[], cwd: string, depth = 0): CheckResu
 					j++;
 					continue;
 				}
-				const r = checkTokens(tokenize(arg), cwd, depth + 1);
+				const r = checkTokens(tokenize(arg), currentCwd ?? cwd, depth + 1, false, boundaryCwd);
 				if (r.dangerous) return r;
 				break;
 			}
@@ -74,7 +149,13 @@ export function checkTokens(tokens: string[], cwd: string, depth = 0): CheckResu
 			let j = i + 1;
 			while (j < tokens.length) {
 				if (tokens[j] === "-c" && j + 1 < tokens.length) {
-					const r = checkTokens(tokenize(tokens[j + 1]), cwd, depth + 1);
+					const r = checkTokens(
+						tokenize(tokens[j + 1]),
+						currentCwd ?? cwd,
+						depth + 1,
+						false,
+						boundaryCwd,
+					);
 					if (r.dangerous) return r;
 					break;
 				}
@@ -97,7 +178,13 @@ export function checkTokens(tokens: string[], cwd: string, depth = 0): CheckResu
 					while (end < tokens.length && !["\\;", "+", ";"].includes(tokens[end])) {
 						end++;
 					}
-					const r = checkTokens(tokens.slice(j + 1, end), cwd, depth + 1);
+					const r = checkTokens(
+						tokens.slice(j + 1, end),
+						currentCwd ?? cwd,
+						depth + 1,
+						false,
+						boundaryCwd,
+					);
 					if (r.dangerous) return r;
 				}
 				j++;
@@ -106,10 +193,17 @@ export function checkTokens(tokens: string[], cwd: string, depth = 0): CheckResu
 			continue;
 		}
 
-		// xargs / parallel: delegate the following command
+		// xargs / parallel: delegate the following command. Its real arguments may
+		// arrive via stdin at runtime, invisible to static token analysis.
 		if (DELEGATION_COMMANDS.has(token)) {
 			if (i + 1 < tokens.length) {
-				const r = checkTokens(tokens.slice(i + 1), cwd, depth + 1);
+				const r = checkTokens(
+					tokens.slice(i + 1),
+					currentCwd ?? cwd,
+					depth + 1,
+					true,
+					boundaryCwd,
+				);
 				if (r.dangerous) return r;
 			}
 			i++;
@@ -145,7 +239,12 @@ export function checkTokens(tokens: string[], cwd: string, depth = 0): CheckResu
 		}
 
 		if (PATH_SENSITIVE_COMMANDS.has(token)) {
-			const r = checkPathSensitive(tokens, i, token, cwd);
+			if (currentCwd === null) {
+				return block(
+					`cannot verify ${JSON.stringify(token)}'s target: a preceding "cd" changed the working directory to a location that could not be statically resolved`,
+				);
+			}
+			const r = checkPathSensitive(tokens, i, token, currentCwd, boundaryCwd, stdinArgs);
 			if (r.dangerous) return r;
 			i++;
 			continue;
