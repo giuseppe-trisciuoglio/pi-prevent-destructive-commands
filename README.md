@@ -1,5 +1,6 @@
 # Prevent Destructive Commands
 
+[![CI](https://github.com/giuseppe-trisciuoglio/pi-prevent-destructive-commands/actions/workflows/ci.yml/badge.svg)](https://github.com/giuseppe-trisciuoglio/pi-prevent-destructive-commands/actions/workflows/ci.yml)
 [![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/giuseppe-trisciuoglio/pi-prevent-destructive-commands)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![pi Extension](https://img.shields.io/badge/pi-extension-purple.svg)](https://pi.dev)
