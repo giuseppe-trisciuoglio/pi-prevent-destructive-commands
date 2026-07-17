@@ -88,7 +88,7 @@ To add a new command category:
 
 ## Continuous Integration
 
-Every push and pull request to `main` runs the [CI workflow](.github/workflows/ci.yml), which typechecks and runs the smoke test suite on Node.js 18, 20, and 22.
+Every push and pull request to `main` runs the [CI workflow](.github/workflows/ci.yml), which typechecks and runs the smoke test suite on Node.js 22 and 24.
 
 ## Releasing
 
