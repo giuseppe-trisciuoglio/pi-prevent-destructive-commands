@@ -109,7 +109,8 @@ prevent-destructive-commands/
 │       ├── file-reading.ts    # sensitive file read detection
 │       └── path-sensitive.ts  # rm/rmdir/... outside-cwd detection
 ├── test/
-│   └── smoke-test.ts     # Standalone test suite (70+ cases)
+│   ├── smoke-test.ts        # Standalone test suite (70+ cases)
+│   └── e2e-install-test.ts  # End-to-end: verifies real installation/discovery by pi
 ├── tsconfig.json     # TypeScript configuration
 ├── package.json      # Package metadata for pi marketplace
 └── README.md         # This file
@@ -119,17 +120,40 @@ prevent-destructive-commands/
 
 ## Testing
 
-Run the comprehensive smoke test suite:
+Run the full test suite (smoke tests + end-to-end installation test):
 
 ```bash
-# Using npm
 npm test
+```
+
+### Smoke tests
+
+Standalone tests for the tokenizer/checker logic (no dependency on pi itself):
+
+```bash
+npm run test:smoke
 
 # Or directly with tsx
 npx tsx test/smoke-test.ts
 
 # Or with jiti
 npx jiti test/smoke-test.ts
+```
+
+### End-to-end installation test
+
+Uses the real `@earendil-works/pi-coding-agent` package to verify the extension actually installs the way the [Installation](#installation) section describes:
+
+- The `pi.extensions` entry in `package.json` resolves to an existing file.
+- Manual installation (cloning into `<agentDir>/extensions/prevent-destructive-commands`) is discovered and loaded by pi's own extension loader.
+- `pi install <path>` records the package and pi can subsequently discover and load it.
+- Once loaded through that real pipeline, the registered `tool_call` handler still blocks/allows commands correctly.
+
+```bash
+npm run test:e2e
+
+# Or directly with tsx
+npx tsx test/e2e-install-test.ts
 ```
 
 The test suite covers:

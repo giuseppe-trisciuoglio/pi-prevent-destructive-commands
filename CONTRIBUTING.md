@@ -65,7 +65,8 @@ prevent-destructive-commands/
 │       ├── file-reading.ts
 │       └── path-sensitive.ts
 ├── test/
-│   └── smoke-test.ts     # Standalone test suite
+│   ├── smoke-test.ts        # Standalone test suite
+│   └── e2e-install-test.ts  # End-to-end: verifies real installation/discovery by pi
 ├── tsconfig.json     # TypeScript configuration
 └── package.json      # Package metadata
 ```
@@ -88,7 +89,7 @@ To add a new command category:
 
 ## Continuous Integration
 
-Every push and pull request to `main` runs the [CI workflow](.github/workflows/ci.yml), which typechecks and runs the smoke test suite on Node.js 22 and 24.
+Every push and pull request to `main` runs the [CI workflow](.github/workflows/ci.yml), which typechecks and runs the smoke test suite and the end-to-end installation test on Node.js 22 and 24.
 
 ## Releasing
 
