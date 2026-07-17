@@ -86,6 +86,19 @@ To add a new command category:
 - Prefer explicit types over implicit ones.
 - Keep functions focused and modular.
 
+## Continuous Integration
+
+Every push and pull request to `main` runs the [CI workflow](.github/workflows/ci.yml), which typechecks and runs the smoke test suite on Node.js 22 and 24.
+
+## Releasing
+
+Publishing to npm is handled by the [Publish workflow](.github/workflows/publish.yml) and is restricted to maintainers:
+
+1. Bump `version` in `package.json` and move the relevant `CHANGELOG.md` entries from "Unreleased" to a new version section.
+2. Commit and merge the version bump to `main`.
+3. Create a GitHub Release with a tag matching `v<version>` (e.g. `v1.1.0`) for the merged commit.
+4. Publishing the Release triggers the workflow, which verifies the tag matches `package.json`, re-runs typecheck/tests, and publishes to npm using the `NPM_TOKEN` repository secret.
+
 ## License
 
 By contributing, you agree that your contributions will be licensed under the MIT License.
