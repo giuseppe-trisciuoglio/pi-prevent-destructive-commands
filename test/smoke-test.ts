@@ -1,12 +1,12 @@
 /**
  * Standalone smoke test for tokenizer + checker.
  * Does not depend on pi: can be run with:
- *   npx tsx smoke-test.ts
- *   npx jiti smoke-test.ts
+ *   npx tsx test/smoke-test.ts
+ *   npx jiti test/smoke-test.ts
  */
 
-import { tokenize } from "./tokenizer";
-import { checkTokens } from "./checker";
+import { tokenize } from "../src/tokenizer";
+import { checkTokens } from "../src/checker";
 
 const CWD = "/home/user/projects/demo";
 
