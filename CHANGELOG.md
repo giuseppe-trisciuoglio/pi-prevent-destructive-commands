@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- `cd` within an analyzed command chain (e.g. `cd /; rm etc/passwd`) is now tracked: relative paths in subsequent path-sensitive commands resolve against the effective directory instead of the untouched real cwd, while the *original* cwd remains the safety boundary. `( … )` subshell scoping is respected — a `cd` inside parentheses no longer leaks out. A `cd` to a statically unresolvable target (`cd "$VAR"`, `cd -`) causes subsequent path-sensitive commands to be blocked conservatively.
+- `xargs`/`parallel` delegating to a path-sensitive command (`rm`, `rmdir`, `shred`, ...) with no explicit target token (e.g. `echo x | xargs rm`) is now blocked: the real arguments arrive via stdin at runtime and can't be statically verified. An explicit target is still checked normally against the working directory.
+
 ### Added
 - CI GitHub Actions workflow: typecheck and smoke tests on Node.js 22 and 24 for every push/PR to `main`.
 - Publish GitHub Actions workflow: publishes to npm when a GitHub Release is published, after verifying the release tag matches `package.json` and re-running typecheck/tests.

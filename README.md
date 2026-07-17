@@ -19,7 +19,7 @@ A faithful port of Claude's `prevent-destructive-commands.py` hook, adapted for 
 - **Recursive analysis** — Traverses command wrappers, shell invocations, pipelines, and nested commands to catch obfuscated attacks.
 - **Configurable** — Tune protection levels via simple flags in `src/config.ts`.
 - **Zero dependencies** — Lightweight, fast, and self-contained.
-- **70+ test cases** — Comprehensive smoke test suite validates all blocking rules.
+- **79+ test cases** — Comprehensive smoke test suite validates all blocking rules.
 
 ## What Gets Blocked
 
@@ -109,7 +109,7 @@ prevent-destructive-commands/
 │       ├── file-reading.ts    # sensitive file read detection
 │       └── path-sensitive.ts  # rm/rmdir/... outside-cwd detection
 ├── test/
-│   ├── smoke-test.ts        # Standalone test suite (70+ cases)
+│   ├── smoke-test.ts        # Standalone test suite (79+ cases)
 │   └── e2e-install-test.ts  # End-to-end: verifies real installation/discovery by pi
 ├── tsconfig.json     # TypeScript configuration
 ├── package.json      # Package metadata for pi marketplace
@@ -176,9 +176,12 @@ As with the original Claude plugin, the analysis is static and therefore cannot 
 
 | Limitation | Example | Explanation |
 |------------|---------|-------------|
-| **Arguments via stdin/pipe** | `echo x \| xargs rm` | The arguments to `rm` are not visible as tokens — they arrive via stdin. |
-| **cd in command** | `cd /; rm etc/passwd` | Evaluated against pi's cwd, not `/`. In practice pi rarely uses `cd` (cwd is already the project root), so risk is low. |
 | **Unknown wrappers** | Custom destructive tools | The extension covers known patterns; unknown wrappers or custom destructive tools are not intercepted. |
+
+Two cases that used to be listed here are now handled:
+
+- **Arguments via stdin/pipe** (`echo x \| xargs rm`) — a path-sensitive command (`rm`, `rmdir`, `shred`, ...) reached through `xargs`/`parallel` with no explicit target token is now blocked: its real targets arrive via stdin at runtime and can't be statically verified, so it's treated as dangerous rather than assumed safe. An explicit target (e.g. `xargs rm ./known-file`) is still checked normally against the working directory.
+- **`cd` in command** (`cd /; rm etc/passwd`) — the analyzer now tracks `cd` within the same command chain (including `( … )` subshell scoping) and resolves subsequent relative paths against that effective directory, while still enforcing the *original* working directory as the safety boundary. `cd /; rm etc/passwd` now correctly resolves to `/etc/passwd` and is blocked. When a `cd` target itself can't be resolved statically (e.g. `cd "$VAR"`, `cd -`), any path-sensitive command that follows is blocked conservatively.
 
 ---
 
