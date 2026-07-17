@@ -9,7 +9,7 @@
  * The block is unconditional: the agent receives the `reason` and must find
  * an alternative. No interactive confirmation is ever requested.
  *
- * Installation: ~/.pi/agent/extensions/prevent-destructive-commands/index.ts
+ * Installation: ~/.pi/agent/extensions/prevent-destructive-commands/src/index.ts
  * Automatically discovered by pi. Reload with /reload after changes.
  */
 

@@ -25,7 +25,7 @@ Be respectful, constructive, and inclusive in all interactions.
 
 1. Fork the repository and create a feature branch.
 2. Make your changes with clear, focused commits.
-3. Run the smoke tests: `npm test` (or `npx tsx smoke-test.ts`).
+3. Run the smoke tests: `npm test` (or `npx tsx test/smoke-test.ts`).
 4. Update the README.md if your change affects user-facing behavior.
 5. Update CHANGELOG.md under the "Unreleased" section.
 6. Submit a pull request with a clear description.
@@ -51,11 +51,21 @@ npm run typecheck
 
 ```
 prevent-destructive-commands/
-├── index.ts          # Extension entry point (factory + tool_call hook)
-├── config.ts         # Blacklists and behavior flags
-├── tokenizer.ts      # Shell tokenizer (shlex-like)
-├── checker.ts        # Recursive destructive command analyzer
-├── smoke-test.ts     # Standalone test suite
+├── src/
+│   ├── index.ts          # Extension entry point (factory + tool_call hook)
+│   ├── config.ts         # Blacklists and behavior flags
+│   ├── tokenizer.ts      # Shell tokenizer (shlex-like)
+│   ├── checker.ts        # Recursive command walker (wrappers/shell/find/xargs)
+│   └── rules/            # Per-category destructive-command handlers
+│       ├── types.ts
+│       ├── path-utils.ts
+│       ├── git.ts
+│       ├── docker.ts
+│       ├── aws.ts
+│       ├── file-reading.ts
+│       └── path-sensitive.ts
+├── test/
+│   └── smoke-test.ts     # Standalone test suite
 ├── tsconfig.json     # TypeScript configuration
 └── package.json      # Package metadata
 ```
@@ -64,9 +74,9 @@ prevent-destructive-commands/
 
 To add a new command category:
 
-1. Add the command patterns to the appropriate set in `config.ts`.
-2. Add the checker logic in `checker.ts` following the existing handler pattern.
-3. Add test cases to `smoke-test.ts`.
+1. Add the command patterns to the appropriate set in `src/config.ts`.
+2. Add the checker logic to a new or existing handler in `src/rules/`, following the existing handler pattern (see `src/rules/git.ts` or `src/rules/docker.ts`), and wire it into the dispatch loop in `src/checker.ts`.
+3. Add test cases to `test/smoke-test.ts`.
 4. Update the README.md documentation.
 
 ## Style Guide

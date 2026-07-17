@@ -16,13 +16,13 @@ A faithful port of Claude's `prevent-destructive-commands.py` hook, adapted for 
 - **Hard-block protection** — Dangerous commands are blocked unconditionally. The agent receives a clear reason and must find a safe alternative.
 - **Works in all modes** — Protection is active even in non-interactive sessions (`-p`, JSON, RPC).
 - **Recursive analysis** — Traverses command wrappers, shell invocations, pipelines, and nested commands to catch obfuscated attacks.
-- **Configurable** — Tune protection levels via simple flags in `config.ts`.
+- **Configurable** — Tune protection levels via simple flags in `src/config.ts`.
 - **Zero dependencies** — Lightweight, fast, and self-contained.
 - **70+ test cases** — Comprehensive smoke test suite validates all blocking rules.
 
 ## What Gets Blocked
 
-All rules are defined in [`config.ts`](config.ts) and can be customized.
+All rules are defined in [`src/config.ts`](src/config.ts) and can be customized.
 
 | Category | Examples |
 |----------|----------|
@@ -30,7 +30,7 @@ All rules are defined in [`config.ts`](config.ts) and can be customized.
 | **Git add/commit** | `git add`, `git commit` *(see `ENABLE_GIT_ADD_COMMIT_BLOCK` flag)* |
 | **rm / path-sensitive** | `rm`, `rmdir`, `shred`, `unlink` targeting paths **outside** the working directory (e.g., `/etc`, `~`, `..`). Targets inside cwd are allowed. |
 | **Destructive Docker** | `docker rm` / `rmi`, `docker container/image/volume/network rm`, `docker * prune`, `docker compose down -v`, `docker compose rm`, `docker context rm`, `docker swarm leave --force` |
-| **Destructive AWS CLI** | `aws s3 rm`, `aws ec2 terminate-instances`, `aws rds delete-db-instance`, `aws cloudformation delete-stack`, and 50+ more subcommands (full list in `config.ts`) |
+| **Destructive AWS CLI** | `aws s3 rm`, `aws ec2 terminate-instances`, `aws rds delete-db-instance`, `aws cloudformation delete-stack`, and 50+ more subcommands (full list in `src/config.ts`) |
 | **Sensitive file reads** | `cat`, `grep`, etc. on `.env`, SSH keys, `.pem` files — **disabled by default** via `ENABLE_SENSITIVE_FILE_CHECK` *(see Configuration)* |
 
 ### Recursive Analysis
@@ -74,7 +74,7 @@ The extension is automatically discovered by pi in all projects.
 
 ## Configuration
 
-Edit the constants in [`config.ts`](config.ts) to tune protection:
+Edit the constants in [`src/config.ts`](src/config.ts) to tune protection:
 
 | Flag | Default | Description |
 |------|---------|-------------|
@@ -94,11 +94,21 @@ pi /reload
 
 ```
 prevent-destructive-commands/
-├── index.ts          # Extension entry point (factory + tool_call hook)
-├── config.ts         # Blacklists and behavior flags — tune protection here
-├── tokenizer.ts      # Shell tokenizer (shlex-like)
-├── checker.ts        # Recursive destructive command analyzer
-├── smoke-test.ts     # Standalone test suite (70+ cases)
+├── src/
+│   ├── index.ts          # Extension entry point (factory + tool_call hook)
+│   ├── config.ts         # Blacklists and behavior flags — tune protection here
+│   ├── tokenizer.ts      # Shell tokenizer (shlex-like)
+│   ├── checker.ts        # Recursive command walker (wrappers/shell/find/xargs)
+│   └── rules/            # Per-category destructive-command handlers
+│       ├── types.ts          # Shared CheckResult type + helpers
+│       ├── path-utils.ts      # cwd-relative path resolution
+│       ├── git.ts             # git reset --hard, push --force, ...
+│       ├── docker.ts          # docker rm, system prune, ...
+│       ├── aws.ts             # aws s3 rm, ec2 terminate-instances, ...
+│       ├── file-reading.ts    # sensitive file read detection
+│       └── path-sensitive.ts  # rm/rmdir/... outside-cwd detection
+├── test/
+│   └── smoke-test.ts     # Standalone test suite (70+ cases)
 ├── tsconfig.json     # TypeScript configuration
 ├── package.json      # Package metadata for pi marketplace
 └── README.md         # This file
@@ -115,10 +125,10 @@ Run the comprehensive smoke test suite:
 npm test
 
 # Or directly with tsx
-npx tsx smoke-test.ts
+npx tsx test/smoke-test.ts
 
 # Or with jiti
-npx jiti smoke-test.ts
+npx jiti test/smoke-test.ts
 ```
 
 The test suite covers:
