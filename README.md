@@ -8,7 +8,7 @@
 
 > **Unconditionally blocks destructive bash commands before execution.** A pi extension that guards your codebase against accidental data loss from `rm`, `git reset --hard`, `docker rm`, `aws delete` operations, and more.
 
-A faithful port of Claude's `prevent-destructive-commands.py` hook, adapted for the [pi coding agent](https://pi.dev). Same rule set, same recursive tokenizer — same peace of mind.
+A faithful port of Claude's [`prevent-destructive-commands.py`](https://github.com/giuseppe-trisciuoglio/developer-kit/blob/main/plugins/developer-kit-core/hooks/prevent-destructive-commands.py) hook, adapted for the [pi coding agent](https://pi.dev). Same rule set, same recursive tokenizer — same peace of mind.
 
 ---
 
@@ -227,5 +227,5 @@ This project is licensed under the [MIT License](LICENSE).
 
 ## Acknowledgments
 
-- Inspired by and ported from Claude's `prevent-destructive-commands.py` hook.
+- Inspired by and ported from Claude's [`prevent-destructive-commands.py`](https://github.com/giuseppe-trisciuoglio/developer-kit/blob/main/plugins/developer-kit-core/hooks/prevent-destructive-commands.py) hook.
 - Built for the [pi coding agent](https://pi.dev) ecosystem.
