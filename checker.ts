@@ -1,10 +1,9 @@
 /**
- * Analizzatore ricorsivo di comandi distruttivi.
+ * Recursive destructive command analyzer.
  *
- * Porting del `_check_tokens` del plugin Claude. Visita la lista di token
- * riconoscendo wrapper, invocazioni di shell, `find -exec`, `xargs`, e i
- * comandi pericolosi (git, docker, aws, path-sensitive, lettura file
- * sensibili). Restituisce il primo motivo di blocco trovato.
+ * Port of Claude's `_check_tokens`. Visits the token list recognizing wrappers,
+ * shell invocations, `find -exec`, `xargs`, and dangerous commands (git, docker,
+ * aws, path-sensitive, sensitive file reads). Returns the first block reason found.
  */
 
 import { isAbsolute, normalize, resolve } from "node:path";
@@ -39,7 +38,7 @@ function block(reason: string): CheckResult {
 	return { dangerous: true, reason };
 }
 
-// ─── Path utilities ───────────────────────────────────────────────────────────
+// ─── Path Utilities ───────────────────────────────────────────────────────────
 
 function expandTilde(p: string): string {
 	if (p === "~") return homedir();
@@ -51,7 +50,7 @@ function expandTilde(p: string): string {
 	return p;
 }
 
-/** `true` se il path contiene variabili/glob risolvibili solo a runtime. */
+/** Returns `true` if the path contains variables/globs resolvable only at runtime. */
 function hasUnresolvableParts(p: string): boolean {
 	return /\$[{(]?|\*|\?|\[/.test(p) || p === "{}";
 }
@@ -65,11 +64,11 @@ function resolvePath(p: string, cwd: string): string | null {
 
 function isOutsideCwd(p: string, cwd: string): CheckResult {
 	if (hasUnresolvableParts(p)) {
-		return block(`variabile o glob irrisolvibile nel path: ${JSON.stringify(p)}`);
+		return block(`unresolvable variable or glob in path: ${JSON.stringify(p)}`);
 	}
 	const resolved = resolvePath(p, cwd);
 	if (resolved === null) {
-		return block(`impossibile risolvere il path in sicurezza: ${JSON.stringify(p)}`);
+		return block(`cannot safely resolve path: ${JSON.stringify(p)}`);
 	}
 	const cwdRoot = cwd.replace(/\/+$/, "");
 	const cwdPrefix = `${cwdRoot}/`;
@@ -77,16 +76,16 @@ function isOutsideCwd(p: string, cwd: string): CheckResult {
 		return SAFE;
 	}
 	return block(
-		`${JSON.stringify(resolved)} è fuori dalla working directory ${JSON.stringify(cwd)}`,
+		`${JSON.stringify(resolved)} is outside the working directory ${JSON.stringify(cwd)}`,
 	);
 }
 
-// ─── Checker ricorsivo ────────────────────────────────────────────────────────
+// ─── Recursive Checker ────────────────────────────────────────────────────────
 
 export function checkTokens(tokens: string[], cwd: string, depth = 0): CheckResult {
 	if (depth > MAX_NESTING_DEPTH) {
 		return block(
-			"nesting dei comandi troppo profondo per analizzare in sicurezza (possibile offuscamento)",
+			"command nesting too deep to safely analyze (possible obfuscation)",
 		);
 	}
 
@@ -105,7 +104,7 @@ export function checkTokens(tokens: string[], cwd: string, depth = 0): CheckResu
 			continue;
 		}
 
-		// Quoted-command wrappers: il primo argomento posizionale è un comando
+		// Quoted-command wrappers: the first positional argument is a command
 		if (QUOTED_COMMAND_WRAPPERS.has(token)) {
 			let j = i + 1;
 			while (j < tokens.length) {
@@ -160,7 +159,7 @@ export function checkTokens(tokens: string[], cwd: string, depth = 0): CheckResu
 			continue;
 		}
 
-		// xargs / parallel: delegano il comando seguente
+		// xargs / parallel: delegate the following command
 		if (DELEGATION_COMMANDS.has(token)) {
 			if (i + 1 < tokens.length) {
 				const r = checkTokens(tokens.slice(i + 1), cwd, depth + 1);
@@ -211,7 +210,7 @@ export function checkTokens(tokens: string[], cwd: string, depth = 0): CheckResu
 	return SAFE;
 }
 
-// ─── Handlers specifici ───────────────────────────────────────────────────────
+// ─── Specific Handlers ────────────────────────────────────────────────────────
 
 function checkAws(tokens: string[], i: number): CheckResult {
 	const parts: string[] = [];
@@ -224,7 +223,7 @@ function checkAws(tokens: string[], i: number): CheckResult {
 	for (let length = parts.length; length > 0; length--) {
 		const sub = parts.slice(0, length).join(" ");
 		if (AWS_DESTRUCTIVE_SUBCOMMANDS.has(sub)) {
-			return block(`operazione AWS CLI distruttiva: aws ${sub}`);
+			return block(`destructive AWS CLI operation: aws ${sub}`);
 		}
 	}
 	return SAFE;
@@ -238,23 +237,23 @@ function checkDocker(tokens: string[], i: number): CheckResult {
 	if (i + 2 < tokens.length) {
 		const compound = `${sub1} ${tokens[i + 2]}`;
 		if (DOCKER_DESTRUCTIVE_COMPOUND.has(compound)) {
-			return block(`operazione Docker distruttiva: docker ${compound}`);
+			return block(`destructive Docker operation: docker ${compound}`);
 		}
 	}
 	if (DOCKER_DESTRUCTIVE_SUBCOMMANDS.has(sub1)) {
-		return block(`operazione Docker distruttiva: docker ${sub1}`);
+		return block(`destructive Docker operation: docker ${sub1}`);
 	}
 	if (sub1 === "compose" && i + 2 < tokens.length) {
 		const composeSub = tokens[i + 2];
 		if (composeSub === "down" && rest.includes("-v")) {
-			return block("docker compose down -v rimuove i volume con rischio di perdita dati");
+			return block("docker compose down -v removes volumes with data loss risk");
 		}
 		if (composeSub === "rm") {
-			return block("docker compose rm rimuove i container fermati");
+			return block("docker compose rm removes stopped containers");
 		}
 	}
 	if (sub1 === "context" && i + 2 < tokens.length && tokens[i + 2] === "rm") {
-		return block("docker context rm rimuove i context Docker");
+		return block("docker context rm removes Docker contexts");
 	}
 	if (
 		sub1 === "swarm" &&
@@ -262,7 +261,7 @@ function checkDocker(tokens: string[], i: number): CheckResult {
 		tokens[i + 2] === "leave" &&
 		rest.includes("--force")
 	) {
-		return block("docker swarm leave --force rimuove forzatamente il nodo dallo swarm");
+		return block("docker swarm leave --force forcibly removes the node from the swarm");
 	}
 	return SAFE;
 }
@@ -280,9 +279,9 @@ const GIT_GLOBAL_FLAGS_WITH_ARG: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Trova il subcommand git reale, saltando i flag globali (con e senza
- * argomento) che possono comparire prima del subcommand, come `-C <path>`.
- * Restituisce l'indice del subcommand, oppure -1 se non c'è.
+ * Finds the real git subcommand, skipping global flags (with and without
+ * arguments) that may appear before the subcommand, like `-C <path>`.
+ * Returns the subcommand index, or -1 if not found.
  */
 function findGitSubcommandIndex(tokens: string[], start: number): number {
 	let j = start + 1;
@@ -290,14 +289,14 @@ function findGitSubcommandIndex(tokens: string[], start: number): number {
 		const t = tokens[j];
 		if (!t || t === "--") return -1;
 		if (GIT_GLOBAL_FLAGS_WITH_ARG.has(t)) {
-			j += 2; // flag + argomento
+			j += 2; // flag + argument
 			continue;
 		}
 		if (t.startsWith("-")) {
 			j++;
 			continue;
 		}
-		return j; // primo token non-flag = subcommand
+		return j; // first non-flag token = subcommand
 	}
 	return -1;
 }
@@ -309,48 +308,48 @@ function checkGit(tokens: string[], i: number): CheckResult {
 	const rest = tokens.slice(subIndex + 1);
 
 	if (sub === "reset" && rest.includes("--hard")) {
-		return block("git reset --hard scarta tutte le modifiche locali");
+		return block("git reset --hard discards all local changes");
 	}
 	if (sub === "clean" && !rest.includes("-n") && !rest.includes("--dry-run")) {
-		return block("git clean rimuove file non tracciati (usa -n per un dry run prima)");
+		return block("git clean removes untracked files (use -n for a dry run first)");
 	}
 	if (sub === "push") {
 		if (rest.includes("--force") || rest.includes("-f")) {
-			return block("git push --force sovrascrive la cronologia remota (distruttivo)");
+			return block("git push --force overwrites remote history (destructive)");
 		}
 		if (rest.includes("--force-with-lease")) {
-			return block("git push --force-with-lease può sovrascrivere la cronologia remota");
+			return block("git push --force-with-lease can overwrite remote history");
 		}
 		if (rest.includes("--delete")) {
-			return block("git push --delete rimuove branch/tag remoti");
+			return block("git push --delete removes remote branches/tags");
 		}
 	}
 	if (sub === "branch" && rest.includes("-D")) {
-		return block("git branch -D elimina forzatamente il branch senza controlli");
+		return block("git branch -D force-deletes the branch without checks");
 	}
 	if (sub === "tag" && (rest.includes("-d") || rest.includes("--delete"))) {
-		return block("git tag -d elimina il tag");
+		return block("git tag -d deletes the tag");
 	}
 	if (sub === "checkout" && (rest.includes("-f") || rest.includes("--force"))) {
-		return block("git checkout -f scarta forzatamente le modifiche locali");
+		return block("git checkout -f forcefully discards local changes");
 	}
 	if (sub === "rebase") {
-		return block("git rebase riscrive la cronologia dei commit (potenzialmente distruttivo)");
+		return block("git rebase rewrites commit history (potentially destructive)");
 	}
 	if (sub === "filter-branch" || sub === "filter-repo") {
-		return block(`git ${sub} riscrive la cronologia del repository (altamente distruttivo)`);
+		return block(`git ${sub} rewrites repository history (highly destructive)`);
 	}
 	if (sub === "reflog" && rest.includes("expire")) {
-		return block("git reflog expire elimina i riferimenti di recupero");
+		return block("git reflog expire deletes recovery references");
 	}
 	if (sub === "update-ref" && (rest.includes("-d") || rest.includes("--delete"))) {
-		return block("git update-ref -d elimina direttamente i riferimenti git");
+		return block("git update-ref -d directly deletes git references");
 	}
 	if (ENABLE_GIT_ADD_COMMIT_BLOCK && sub === "add") {
-		return block("git add stages le modifiche nell'indice");
+		return block("git add stages changes to the index");
 	}
 	if (ENABLE_GIT_ADD_COMMIT_BLOCK && sub === "commit") {
-		return block("git commit crea nuovi commit nel repository");
+		return block("git commit creates new commits in the repository");
 	}
 	return SAFE;
 }
@@ -368,7 +367,7 @@ function checkFileReading(tokens: string[], i: number): CheckResult {
 		const argLower = arg.toLowerCase();
 		for (const pattern of SENSITIVE_FILE_PATTERNS) {
 			if (argLower.includes(pattern) || argLower.endsWith(pattern)) {
-				return block(`tentativo di leggere un file sensibile: ${JSON.stringify(arg)}`);
+				return block(`attempt to read sensitive file: ${JSON.stringify(arg)}`);
 			}
 		}
 		j++;
@@ -397,7 +396,7 @@ function checkPathSensitive(
 		const r = isOutsideCwd(arg, cwd);
 		if (r.dangerous) {
 			return block(
-				`${JSON.stringify(token)} bersaglia un path fuori dalla working directory — ${r.reason}`,
+				`${JSON.stringify(token)} targets a path outside the working directory — ${r.reason}`,
 			);
 		}
 		j++;

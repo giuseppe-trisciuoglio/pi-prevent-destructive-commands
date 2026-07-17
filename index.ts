@@ -1,16 +1,16 @@
 /**
- * Extension pi: "prevent-destructive-commands".
+ * pi Extension: "prevent-destructive-commands".
  *
- * Blocca (hard block) i comandi bash distruttivi prima dell'esecuzione.
- * Porting del hook Claude `prevent-destructive-commands.py`: stesso set di
- * regole (git, rm/path-sensitive, docker, aws, lettura file sensibili) e
- * stesso tokenizer ricorsivo per wrapper/shell/find/xargs.
+ * Unconditionally blocks destructive bash commands before execution.
+ * A faithful port of the Claude hook `prevent-destructive-commands.py`:
+ * same rule set (git, rm/path-sensitive, docker, aws, sensitive file reads)
+ * and same recursive tokenizer for wrappers/shell/find/xargs.
  *
- * Il blocco è incondizionato: l'agente riceve il `reason` e deve cercare
- * un'alternativa. Non viene richiesta conferma interattiva.
+ * The block is unconditional: the agent receives the `reason` and must find
+ * an alternative. No interactive confirmation is ever requested.
  *
- * Installazione: ~/.pi/agent/extensions/prevent-destructive-commands/index.ts
- * Viene scoperta automaticamente da pi. Ricarica con /reload dopo le modifiche.
+ * Installation: ~/.pi/agent/extensions/prevent-destructive-commands/index.ts
+ * Automatically discovered by pi. Reload with /reload after changes.
  */
 
 import { isToolCallEventType, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -29,7 +29,7 @@ export default function (pi: ExtensionAPI) {
 		if (dangerous) {
 			return {
 				block: true,
-				reason: `Comando bloccato dalla protezione anti-distruttiva: ${reason}`,
+				reason: `[prevent-destructive-commands] Blocked: ${reason}`,
 			};
 		}
 

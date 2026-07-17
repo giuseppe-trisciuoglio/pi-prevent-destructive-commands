@@ -1,14 +1,18 @@
 /**
- * Configurazione dell'estensione "prevent-destructive-commands".
+ * Configuration for the "prevent-destructive-commands" extension.
  *
- * Porting fedele del hook Claude `prevent-destructive-commands.py`:
- * tutte le liste nere e i flag di comportamento vivono qui, così è
- * sufficiente modificare questo singolo file per tarare la protezione.
+ * Faithful port of the Claude hook `prevent-destructive-commands.py`:
+ * all blacklists and behavior flags live here, so modifying this single
+ * file is enough to tune the protection.
  */
 
+// =============================================================================
+// Command Categories
+// =============================================================================
+
 /**
- * Comandi che ricevono path come argomento: i loro target vengono
- * validati contro la working directory corrente.
+ * Commands that receive paths as arguments: their targets are validated
+ * against the current working directory.
  */
 export const PATH_SENSITIVE_COMMANDS: ReadonlySet<string> = new Set([
 	"rm",
@@ -20,8 +24,8 @@ export const PATH_SENSITIVE_COMMANDS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Comandi che leggono contenuto di file: usati per rilevare accessi a
- * file sensibili (es. `.env`, chiavi SSH, credenziali).
+ * Commands that read file content: used to detect access to sensitive
+ * files (e.g., `.env`, SSH keys, credentials).
  */
 export const FILE_READING_COMMANDS: ReadonlySet<string> = new Set([
 	"cat",
@@ -52,11 +56,11 @@ export const FILE_READING_COMMANDS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Pattern di nomi di file considerati sensibili. Il match è case-insensitive
- * e verifica sia `includes` che `endsWith`, come nel plugin Claude originale.
+ * File name patterns considered sensitive. Matching is case-insensitive
+ * and checks both `includes` and `endsWith`, as in the original Claude plugin.
  */
 export const SENSITIVE_FILE_PATTERNS: readonly string[] = [
-	// Environment
+	// Environment files
 	".env",
 	".env.local",
 	".env.production",
@@ -64,7 +68,7 @@ export const SENSITIVE_FILE_PATTERNS: readonly string[] = [
 	".env.test",
 	".env.staging",
 	".envrc",
-	// Chiavi SSH
+	// SSH keys
 	"id_rsa",
 	"id_dsa",
 	"id_ecdsa",
@@ -75,18 +79,18 @@ export const SENSITIVE_FILE_PATTERNS: readonly string[] = [
 	"id_ed25519.pub",
 	"authorized_keys",
 	"known_hosts",
-	// Credenziali AWS
+	// AWS credentials
 	"credentials",
 	"config",
-	// Credenziali database
+	// Database credentials
 	".pgpass",
 	".my.cnf",
 	".netrc",
-	// Registry package
+	// Package registry
 	".npmrc",
 	".pypirc",
 	"pip.conf",
-	// Altri secret
+	// Other secrets
 	".htpasswd",
 	"vault-password",
 	"secret",
@@ -97,7 +101,7 @@ export const SENSITIVE_FILE_PATTERNS: readonly string[] = [
 	"secrets.yaml",
 	"secret.yml",
 	"secrets.yml",
-	// Chiavi private
+	// Private keys
 	".key",
 	".pem",
 	".p12",
@@ -107,8 +111,12 @@ export const SENSITIVE_FILE_PATTERNS: readonly string[] = [
 	"private-key",
 ];
 
+// =============================================================================
+// AWS / Docker Destructive Operations
+// =============================================================================
+
 /**
- * Sotto-comandi AWS CLI distruttivi, confrontati come "<service> <operation>".
+ * Destructive AWS CLI subcommands, matched as "<service> <operation>".
  */
 export const AWS_DESTRUCTIVE_SUBCOMMANDS: ReadonlySet<string> = new Set([
 	"s3 rm",
@@ -158,10 +166,10 @@ export const AWS_DESTRUCTIVE_SUBCOMMANDS: ReadonlySet<string> = new Set([
 	"sqs delete-queue",
 ]);
 
-/** Sotto-comandi Docker distruttivi nella forma legacy (`docker rm`). */
+/** Destructive Docker subcommands in legacy form (`docker rm`). */
 export const DOCKER_DESTRUCTIVE_SUBCOMMANDS: ReadonlySet<string> = new Set(["rm", "rmi"]);
 
-/** Sotto-comandi Docker distruttivi nella forma moderna (`docker container rm`). */
+/** Destructive Docker subcommands in modern form (`docker container rm`). */
 export const DOCKER_DESTRUCTIVE_COMPOUND: ReadonlySet<string> = new Set([
 	"container rm",
 	"image rm",
@@ -175,9 +183,13 @@ export const DOCKER_DESTRUCTIVE_COMPOUND: ReadonlySet<string> = new Set([
 	"builder prune",
 ]);
 
+// =============================================================================
+// Wrapper / Delegation Commands
+// =============================================================================
+
 /**
- * Comandi wrapper che delegano al comando reale nel token successivo
- * (es. `sudo rm`, `env -i rm`, `timeout 10 rm`). Vengono saltati nell'analisi.
+ * Wrapper commands that delegate to the real command in the next token
+ * (e.g., `sudo rm`, `env -i rm`, `timeout 10 rm`). These are skipped during analysis.
  */
 export const WRAPPER_COMMANDS: ReadonlySet<string> = new Set([
 	"sudo",
@@ -190,8 +202,8 @@ export const WRAPPER_COMMANDS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Comandi che eseguono come comando il primo argomento posizionale non-flag,
- * dato come stringa quotata da ritokenizzare (es. `watch "rm foo"`).
+ * Commands that execute the first non-flag positional argument as a command,
+ * given as a quoted string to be re-tokenized (e.g., `watch "rm foo"`).
  */
 export const QUOTED_COMMAND_WRAPPERS: ReadonlySet<string> = new Set([
 	"watch",
@@ -199,7 +211,7 @@ export const QUOTED_COMMAND_WRAPPERS: ReadonlySet<string> = new Set([
 	"ltrace",
 ]);
 
-/** Invocazioni di shell entro cui ricorrere per l'argomento `-c`. */
+/** Shell invocations within which to recurse for the `-c` argument. */
 export const SHELL_COMMANDS: ReadonlySet<string> = new Set([
 	"bash",
 	"sh",
@@ -209,10 +221,10 @@ export const SHELL_COMMANDS: ReadonlySet<string> = new Set([
 	"ksh",
 ]);
 
-/** Comandi che pipeano i loro argomenti come nuovo comando. */
+/** Commands that pipe their arguments as a new command. */
 export const DELEGATION_COMMANDS: ReadonlySet<string> = new Set(["xargs", "parallel"]);
 
-/** Flag di `find` che delegano esecuzione. */
+/** `find` flags that delegate execution. */
 export const FIND_EXEC_FLAGS: ReadonlySet<string> = new Set([
 	"-exec",
 	"-execdir",
@@ -221,8 +233,8 @@ export const FIND_EXEC_FLAGS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Operatori di shell riconosciuti come token separatori dal tokenizer.
- * Devono restare allineati con `tokenizer.ts`.
+ * Shell operators recognized as token separators by the tokenizer.
+ * Must stay aligned with `tokenizer.ts`.
  */
 export const SHELL_OPERATORS: ReadonlySet<string> = new Set([
 	"|",
@@ -242,27 +254,27 @@ export const SHELL_OPERATORS: ReadonlySet<string> = new Set([
 	"2>>",
 ]);
 
-// ─── Flag di comportamento ───────────────────────────────────────────────────
+// =============================================================================
+// Behavior Flags
+// =============================================================================
 
 /**
- * Se `true`, blocca anche `git add` e `git commit`.
- * Coerente con progetti in cui l'agente non deve creare commit in autonomia
- * (es. regola "no commits/push" del MES La Sportiva).
+ * If `true`, also blocks `git add` and `git commit`.
+ * Consistent with projects where the agent should not create commits autonomously.
  */
 export const ENABLE_GIT_ADD_COMMIT_BLOCK = true;
 
 /**
- * Se `true`, blocca i comandi di lettura file (`cat`, `grep`, ...) quando
- * puntano a file sensibili (`.env`, chiavi SSH, credenziali).
+ * If `true`, blocks file reading commands (`cat`, `grep`, ...) when they
+ * target sensitive files (`.env`, SSH keys, credentials).
  *
- * Disattivato di default: il substring matching del plugin originale è
- * molto rumoroso in un workflow di coding (es. "config" matcha tsconfig,
- * vite.config, next.config; ".env" matcha .environment.ts). Attivalo solo se
- * ti serve, sapendo dei falsi positivi, oppure affina i pattern qui sotto
- * (ad es. rimuovendo "config"/"secret" generici e tenendo solo le forme
- * con estensione).
+ * Disabled by default: the original plugin's substring matching is very noisy
+ * in a coding workflow (e.g., "config" matches tsconfig, vite.config, next.config;
+ * ".env" matches .environment.ts). Enable only if needed, aware of the false
+ * positives, or refine the patterns below (e.g., remove generic "config"/"secret"
+ * and keep only forms with extensions).
  */
 export const ENABLE_SENSITIVE_FILE_CHECK = false;
 
-/** Profondità massima di nesting prima di considerare il comando offuscato. */
+/** Maximum nesting depth before considering the command obfuscated. */
 export const MAX_NESTING_DEPTH = 5;
