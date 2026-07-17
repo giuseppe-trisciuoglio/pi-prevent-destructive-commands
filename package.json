@@ -31,7 +31,9 @@
     "node": ">=18.0.0"
   },
   "scripts": {
-    "test": "npx tsx test/smoke-test.ts",
+    "test": "npm run test:smoke && npm run test:e2e",
+    "test:smoke": "npx tsx test/smoke-test.ts",
+    "test:e2e": "npx tsx test/e2e-install-test.ts",
     "lint": "tsc --noEmit",
     "typecheck": "tsc --noEmit"
   },
@@ -39,6 +41,7 @@
     "@earendil-works/pi-coding-agent": ">=0.1.0"
   },
   "devDependencies": {
+    "@earendil-works/pi-coding-agent": ">=0.1.0",
     "typescript": "^5.4.0",
     "tsx": "^4.7.0"
   },
@@ -47,9 +50,8 @@
     "displayName": "Prevent Destructive Commands",
     "description": "Blocks destructive bash commands (rm, git reset, docker rm, AWS delete, etc.) before execution.",
     "category": "security",
-    "entryPoint": "./src/index.ts",
-    "permissions": [
-      "tool_call:bash"
+    "extensions": [
+      "./src/index.ts"
     ]
   }
 }
