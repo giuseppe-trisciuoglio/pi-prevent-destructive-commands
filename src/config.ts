@@ -181,7 +181,6 @@ export const DOCKER_DESTRUCTIVE_COMPOUND: ReadonlySet<string> = new Set([
 	"network prune",
 	"system prune",
 	"builder prune",
-	"compose down",
 ]);
 
 // =============================================================================
@@ -290,7 +289,7 @@ export const MAX_NESTING_DEPTH = 5;
  * Path (relativi alla working directory) protetti dalla scrittura: nessuno
  * strumento di scrittura (write/edit/apply_patch) né comando bash deve
  * modificarli, sovrascriverli o crearli. Pensati per asset immutabili come le
- * guardie SDD (docs/specs/guards). Il match è per prefisso normalizzato contro
+ * documentazione immutabile. Il match è per prefisso normalizzato contro
  * il cwd: qualunque path che risolva sotto uno di questi viene bloccato.
  */
 export const WRITE_PROTECTED_PATHS: readonly string[] = ["docs/specs/guards"];

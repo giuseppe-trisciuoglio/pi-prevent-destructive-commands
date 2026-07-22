@@ -31,9 +31,10 @@
     "node": ">=18.0.0"
   },
   "scripts": {
-    "test": "npm run test:smoke && npm run test:e2e",
+    "test": "npm run test:smoke && npm run test:migration-guard && npm run test:e2e",
     "test:smoke": "npx tsx test/smoke-test.ts",
     "test:e2e": "npx tsx test/e2e-install-test.ts",
+    "test:migration-guard": "npx tsx test/migration-guard-test.ts",
     "lint": "tsc --noEmit",
     "typecheck": "tsc --noEmit"
   },
