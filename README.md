@@ -17,6 +17,7 @@ A faithful port of Claude's [`prevent-destructive-commands.py`](https://github.c
 - **Hard-block protection** — Dangerous commands are blocked unconditionally. The agent receives a clear reason and must find a safe alternative.
 - **Works in all modes** — Protection is active even in non-interactive sessions (`-p`, JSON, RPC).
 - **Recursive analysis** — Traverses command wrappers, shell invocations, pipelines, and nested commands to catch obfuscated attacks.
+- **Nx configuration guard** — In Nx workspaces, existing `package.json` and TypeScript configuration files are immutable to the agent; missing ones can still be created.
 - **Configurable** — Tune protection levels via simple flags in `src/config.ts`.
 - **Zero dependencies** — Lightweight, fast, and self-contained.
 - **79+ test cases** — Comprehensive smoke test suite validates all blocking rules.
@@ -33,6 +34,7 @@ All rules are defined in [`src/config.ts`](src/config.ts) and can be customized.
 | **Destructive Docker** | `docker rm` / `rmi`, `docker container/image/volume/network rm`, `docker * prune`, `docker compose down -v`, `docker compose rm`, `docker context rm`, `docker swarm leave --force` |
 | **Destructive AWS CLI** | `aws s3 rm`, `aws ec2 terminate-instances`, `aws rds delete-db-instance`, `aws cloudformation delete-stack`, and 50+ more subcommands (full list in `src/config.ts`) |
 | **Sensitive file reads** | `cat`, `grep`, etc. on `.env`, SSH keys, `.pem` files — **disabled by default** via `ENABLE_SENSITIVE_FILE_CHECK` *(see Configuration)* |
+| **Existing Nx configuration** | `package.json`, `tsconfig.json`, `tsconfig.base.json`, `tsconfig.lib.json`, and `tsconfig.spec.json` anywhere below a workspace containing `nx.json`. Creating a missing file is allowed; changing or deleting an existing file is blocked. |
 
 ### Recursive Analysis
 
@@ -100,6 +102,8 @@ prevent-destructive-commands/
 │   ├── config.ts         # Blacklists and behavior flags — tune protection here
 │   ├── tokenizer.ts      # Shell tokenizer (shlex-like)
 │   ├── checker.ts        # Recursive command walker (wrappers/shell/find/xargs)
+│   ├── migration-guard.ts
+│   ├── nx-guard.ts       # Protects existing Nx package and TypeScript configuration files
 │   └── rules/            # Per-category destructive-command handlers
 │       ├── types.ts          # Shared CheckResult type + helpers
 │       ├── path-utils.ts      # cwd-relative path resolution
@@ -110,6 +114,8 @@ prevent-destructive-commands/
 │       └── path-sensitive.ts  # rm/rmdir/... outside-cwd detection
 ├── test/
 │   ├── smoke-test.ts        # Standalone test suite (79+ cases)
+│   ├── migration-guard-test.ts
+│   ├── nx-guard-test.ts     # Verifies Nx configuration protection and allowed creation
 │   └── e2e-install-test.ts  # End-to-end: verifies real installation/discovery by pi
 ├── tsconfig.json     # TypeScript configuration
 ├── package.json      # Package metadata for pi marketplace
@@ -120,7 +126,7 @@ prevent-destructive-commands/
 
 ## Testing
 
-Run the full test suite (smoke tests + end-to-end installation test):
+Run the full test suite (command safety, migration, Nx, and end-to-end checks):
 
 ```bash
 npm test
@@ -132,6 +138,7 @@ Standalone tests for the tokenizer/checker logic (no dependency on pi itself):
 
 ```bash
 npm run test:smoke
+npm run test:nx-guard
 
 # Or directly with tsx
 npx tsx test/smoke-test.ts
@@ -158,6 +165,7 @@ npx tsx test/e2e-install-test.ts
 
 The test suite covers:
 - All destructive Git operations
+- Existing Nx package and TypeScript configuration protection, including direct tool writes, patches, shell redirection, and package-manager dependency changes
 - Path-sensitive `rm` protection
 - Docker destructive commands
 - AWS CLI destructive subcommands

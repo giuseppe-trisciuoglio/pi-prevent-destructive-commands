@@ -7,6 +7,7 @@ import {
 	isDrizzleMigrationPath,
 	isPotentialMigrationMutation,
 } from "./migration-guard";
+import { findNxConfigurationMutation, NX_CONFIG_BLOCK_REASON } from "./nx-guard";
 import { tokenize } from "./tokenizer";
 
 function pathsFromPatch(patch: string): string[] {
@@ -59,6 +60,15 @@ function commandReferencesMigrationPath(command: string, cwd: string, migrationD
 
 export default function (pi: ExtensionAPI) {
 	pi.on("tool_call", async (event, ctx) => {
+		const nxConfigurationPath = await findNxConfigurationMutation(
+			event.toolName,
+			event.input as Record<string, unknown>,
+			ctx.cwd,
+		);
+		if (nxConfigurationPath) {
+			return { block: true, reason: NX_CONFIG_BLOCK_REASON };
+		}
+
 		const migrationDirectories = await findDrizzleMigrationDirectories(ctx.cwd);
 
 		if (migrationDirectories.length > 0) {
