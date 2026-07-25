@@ -1,5 +1,5 @@
 {
-  "name": "@giuseppe-trisciuoglio/pi-prevent-destructive-commands",
+  "name": "@giuseppe.trisciuoglio/pi-prevent-destructive-commands",
   "version": "1.0.0",
   "description": "Unconditionally blocks destructive bash commands before execution. A pi extension that guards against rm, git reset --hard, docker rm, aws delete operations, and more.",
   "keywords": [
