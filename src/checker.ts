@@ -25,7 +25,7 @@ import { checkDocker } from "./rules/docker";
 import { checkFileReading } from "./rules/file-reading";
 import { checkGit } from "./rules/git";
 import { checkPathSensitive } from "./rules/path-sensitive";
-import { resolvePath } from "./rules/path-utils";
+import { isOutsideCwd, resolvePath } from "./rules/path-utils";
 import { type CheckResult, SAFE, block } from "./rules/types";
 
 export type { CheckResult };
@@ -178,9 +178,30 @@ export function checkTokens(
 			continue;
 		}
 
-		// find -exec rm {} \;
+		// `find`: validate the start paths against the boundary directory, then
+		// recurse into any -exec delegate. Start paths are the consecutive
+		// non-flag tokens right after `find` (after skipping leading flags such
+		// as -L/-H/-P); the first option token ends the list.
 		if (token === "find") {
 			let j = i + 1;
+			while (j < tokens.length && tokens[j]?.startsWith("-")) {
+				j++;
+			}
+			while (j < tokens.length && !tokens[j]!.startsWith("-")) {
+				const startPath = tokens[j]!;
+				if (currentCwd === null || SHELL_OPERATORS.has(startPath)) {
+					return block(
+						`cannot verify ${JSON.stringify("find")}'s search root: a preceding "cd" changed the working directory to a location that could not be statically resolved`,
+					);
+				}
+				const r = isOutsideCwd(startPath, currentCwd, boundaryCwd);
+				if (r.dangerous) {
+					return block(
+						`${JSON.stringify("find")} searches outside the working directory — ${r.reason}`,
+					);
+				}
+				j++;
+			}
 			while (j < tokens.length) {
 				if (FIND_EXEC_FLAGS.has(tokens[j]) && j + 1 < tokens.length) {
 					let end = j + 2;

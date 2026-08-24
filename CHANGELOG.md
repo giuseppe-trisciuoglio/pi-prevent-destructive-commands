@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `xargs`/`parallel` delegating to a path-sensitive command (`rm`, `rmdir`, `shred`, ...) with no explicit target token (e.g. `echo x | xargs rm`) is now blocked: the real arguments arrive via stdin at runtime and can't be statically verified. An explicit target is still checked normally against the working directory.
 
 ### Added
+- New guard: `find` commands whose search roots are outside the working directory are blocked (e.g. `find /etc`, `find ~`, `find ..`), including globbed start paths and search roots made unverifiable by a preceding unresolved `cd`. In-boundary starts (`find .`, `find src test`) remain allowed and `-exec` payload analysis is unchanged. Adds `test/find-start-path-test.ts` (`npm run test:find-start-path`).
 - Nx workspace protection: blocks the agent from modifying or deleting existing `package.json`, `tsconfig.json`, `tsconfig.base.json`, `tsconfig.lib.json`, and `tsconfig.spec.json` files anywhere beneath a workspace with `nx.json`. Missing files remain creatable. The guard covers direct file tools, patches, common shell mutations, and package-manager dependency commands.
 - CI GitHub Actions workflow: typecheck and smoke tests on Node.js 22 and 24 for every push/PR to `main`.
 - Publish GitHub Actions workflow: publishes to npm when a GitHub Release is published, after verifying the release tag matches `package.json` and re-running typecheck/tests.

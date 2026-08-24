@@ -31,6 +31,7 @@ All rules are defined in [`src/config.ts`](src/config.ts) and can be customized.
 | **Destructive Git** | `git reset --hard`, `git clean`, `git push --force` / `-f` / `--delete`, `git branch -D`, `git tag -d`, `git checkout -f`, `git rebase`, `git filter-branch`, `git filter-repo`, `git reflog expire`, `git update-ref -d` |
 | **Git add/commit/push** | `git add`, `git commit`, `git push` *(see `ENABLE_GIT_ADD_COMMIT_BLOCK` flag and the per-project opt-out below; force/delete push variants are always blocked)* |
 | **rm / path-sensitive** | `rm`, `rmdir`, `shred`, `unlink` targeting paths **outside** the working directory (e.g., `/etc`, `~`, `..`). Targets inside cwd are allowed. |
+| **find outside cwd** | `find` whose search root is **outside** the working directory (e.g., `find /etc`, `find ~`, `find ..`). Search roots inside cwd are allowed; `-exec` payloads are analyzed recursively as before. |
 | **Destructive Docker** | `docker rm` / `rmi`, `docker container/image/volume/network rm`, `docker * prune`, `docker compose down -v`, `docker compose rm`, `docker context rm`, `docker swarm leave --force` |
 | **Destructive AWS CLI** | `aws s3 rm`, `aws ec2 terminate-instances`, `aws rds delete-db-instance`, `aws cloudformation delete-stack`, and 50+ more subcommands (full list in `src/config.ts`) |
 | **Sensitive file reads** | `cat`, `grep`, etc. on `.env`, SSH keys, `.pem` files — **disabled by default** via `ENABLE_SENSITIVE_FILE_CHECK` *(see Configuration)* |
