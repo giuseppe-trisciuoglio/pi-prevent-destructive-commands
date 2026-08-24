@@ -25,7 +25,7 @@ const cases: Case[] = [
 	{ command: "git push --force origin main", expectBlocked: true },
 	{ command: "git push -f origin main", expectBlocked: true },
 	{ command: "git push --force-with-lease", expectBlocked: true },
-	{ command: "git push origin main", expectBlocked: false },
+	{ command: "git push origin main", expectBlocked: true, note: "push guard active by default" },
 	{ command: "git push --delete origin feature", expectBlocked: true },
 	{ command: "git branch -D old-feature", expectBlocked: true },
 	{ command: "git branch -d old-feature", expectBlocked: false, note: "-d is safe" },

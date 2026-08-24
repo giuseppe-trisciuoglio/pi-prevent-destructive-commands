@@ -29,7 +29,7 @@ All rules are defined in [`src/config.ts`](src/config.ts) and can be customized.
 | Category | Examples |
 |----------|----------|
 | **Destructive Git** | `git reset --hard`, `git clean`, `git push --force` / `-f` / `--delete`, `git branch -D`, `git tag -d`, `git checkout -f`, `git rebase`, `git filter-branch`, `git filter-repo`, `git reflog expire`, `git update-ref -d` |
-| **Git add/commit** | `git add`, `git commit` *(see `ENABLE_GIT_ADD_COMMIT_BLOCK` flag)* |
+| **Git add/commit/push** | `git add`, `git commit`, `git push` *(see `ENABLE_GIT_ADD_COMMIT_BLOCK` flag and the per-project opt-out below; force/delete push variants are always blocked)* |
 | **rm / path-sensitive** | `rm`, `rmdir`, `shred`, `unlink` targeting paths **outside** the working directory (e.g., `/etc`, `~`, `..`). Targets inside cwd are allowed. |
 | **Destructive Docker** | `docker rm` / `rmi`, `docker container/image/volume/network rm`, `docker * prune`, `docker compose down -v`, `docker compose rm`, `docker context rm`, `docker swarm leave --force` |
 | **Destructive AWS CLI** | `aws s3 rm`, `aws ec2 terminate-instances`, `aws rds delete-db-instance`, `aws cloudformation delete-stack`, and 50+ more subcommands (full list in `src/config.ts`) |
@@ -81,7 +81,7 @@ Edit the constants in [`src/config.ts`](src/config.ts) to tune protection:
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `ENABLE_GIT_ADD_COMMIT_BLOCK` | `true` | Blocks `git add` and `git commit`. Set to `false` if you want the agent to create commits autonomously. |
+| `ENABLE_GIT_ADD_COMMIT_BLOCK` | `true` | Blocks `git add`, `git commit`, and plain `git push`. Set to `false` if you want the agent to commit and push autonomously; can be overridden per project via `.pi/prevent-destructive-commands.json` (see below). |
 | `ENABLE_SENSITIVE_FILE_CHECK` | `false` | Blocks reading of sensitive files (`.env`, SSH keys, credentials). Disabled by default due to false positives from substring matching (`config` matches `tsconfig`, `vite.config`; `.env` matches `.environment.ts`). Enable only if needed and consider refining `SENSITIVE_FILE_PATTERNS`. |
 | `MAX_NESTING_DEPTH` | `5` | Maximum command nesting depth before treating as obfuscated. |
 

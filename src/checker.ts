@@ -30,6 +30,13 @@ import { type CheckResult, SAFE, block } from "./rules/types";
 
 export type { CheckResult };
 
+/** Per-call behavior toggles, resolved once per tool call from the project config. */
+export interface CheckerOptions {
+	gitGuardsEnabled: boolean;
+}
+
+const DEFAULT_CHECKER_OPTIONS: CheckerOptions = { gitGuardsEnabled: true };
+
 /**
  * @param cwd Directory relative paths resolve against for *this* call. At the top
  *   level this is the real working directory; recursive calls pass the effective
@@ -49,6 +56,7 @@ export function checkTokens(
 	depth = 0,
 	stdinArgs = false,
 	boundaryCwd: string = cwd,
+	options: CheckerOptions = DEFAULT_CHECKER_OPTIONS,
 ): CheckResult {
 	if (depth > MAX_NESTING_DEPTH) {
 		return block(
@@ -136,7 +144,7 @@ export function checkTokens(
 					j++;
 					continue;
 				}
-				const r = checkTokens(tokenize(arg), currentCwd ?? cwd, depth + 1, false, boundaryCwd);
+				const r = checkTokens(tokenize(arg), currentCwd ?? cwd, depth + 1, false, boundaryCwd, options);
 				if (r.dangerous) return r;
 				break;
 			}
@@ -155,6 +163,7 @@ export function checkTokens(
 						depth + 1,
 						false,
 						boundaryCwd,
+						options,
 					);
 					if (r.dangerous) return r;
 					break;
@@ -184,6 +193,7 @@ export function checkTokens(
 						depth + 1,
 						false,
 						boundaryCwd,
+						options,
 					);
 					if (r.dangerous) return r;
 				}
@@ -203,6 +213,7 @@ export function checkTokens(
 					depth + 1,
 					true,
 					boundaryCwd,
+					options,
 				);
 				if (r.dangerous) return r;
 			}
@@ -225,7 +236,7 @@ export function checkTokens(
 		}
 
 		if (token === "git") {
-			const r = checkGit(tokens, i);
+			const r = checkGit(tokens, i, options.gitGuardsEnabled);
 			if (r.dangerous) return r;
 			i++;
 			continue;

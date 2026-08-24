@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI GitHub Actions workflow: typecheck and smoke tests on Node.js 22 and 24 for every push/PR to `main`.
 - Publish GitHub Actions workflow: publishes to npm when a GitHub Release is published, after verifying the release tag matches `package.json` and re-running typecheck/tests.
 - End-to-end installation test (`test/e2e-install-test.ts`, `npm run test:e2e`): uses the real `@earendil-works/pi-coding-agent` package to verify manual installation and `pi install` are both discovered and loaded correctly, and that the loaded `tool_call` handler blocks/allows commands as expected. `npm test` now runs the smoke suite and the e2e test.
+- New guard: plain `git push` is now blocked by default (force/delete variants were already blocked and remain unconditionally blocked).
+- Per-project opt-out file `.pi/prevent-destructive-commands.json` (e.g. `{"disableGitGuards": true}`) disables the `git add` / `git commit` / `git push` guards for that project only. The file is project-level (no global fallback), picked up live via mtime caching, and the agent is blocked from creating or modifying it through writing tools or bash mutations — it must be managed manually by the user. Adds `test/project-config-test.ts` (`npm run test:project-config`).
 
 ### Fixed
 - `package.json`'s `pi` manifest declared an `entryPoint` field that pi's extension loader does not read, so the extension was never discovered when manually installed by cloning into `<agentDir>/extensions/prevent-destructive-commands` as documented in the README. Replaced it with the `pi.extensions` array field that pi actually resolves.
