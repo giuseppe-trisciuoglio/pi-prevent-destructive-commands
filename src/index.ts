@@ -18,6 +18,7 @@ import {
 	loadProjectConfig,
 } from "./project-config";
 import { tokenize } from "./tokenizer";
+import { registerGitGuardsCommand } from "./git-guards-command";
 
 function pathsFromPatch(patch: string): string[] {
 	const paths: string[] = [];
@@ -68,6 +69,8 @@ function commandReferencesMigrationPath(command: string, cwd: string, migrationD
 }
 
 export default function (pi: ExtensionAPI) {
+	registerGitGuardsCommand(pi);
+
 	pi.on("tool_call", async (event, ctx) => {
 		// The per-project opt-out file is user-only: the agent must never create
 		// or edit it, neither through the writing tools nor through bash.

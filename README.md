@@ -91,6 +91,31 @@ After any change, reload the extension:
 pi /reload
 ```
 
+### Per-Project Opt-Out
+
+Create `.pi/prevent-destructive-commands.json` in the project root to disable the `git add` / `git commit` / `git push` guards **for that project only**:
+
+```json
+{
+	"disableGitGuards": true
+}
+```
+
+Or use the `/git-guards` slash command from the pi TUI:
+
+| Command | Effect |
+|---------|--------|
+| `/git-guards` | Show whether the guards are active for the current project, and the state of the opt-out file. |
+| `/git-guards off` | Write `{"disableGitGuards": true}` (unrelated JSON keys are preserved). |
+| `/git-guards on` | Write `{"disableGitGuards": false}`. |
+
+Notes:
+
+- Forceful and deleting push variants (`--force`, `-f`, `--force-with-lease`, `-d`, `--delete`) are **always blocked** and cannot be opted out.
+- There is no global fallback: the file only applies to the project it lives in. A missing or invalid file keeps the guards active (safe default).
+- The file is user-managed: the agent is blocked from creating or editing it via writing tools or bash. `/git-guards` is exempt because it runs only on explicit user invocation in the extension process.
+- Changes are picked up live (mtime-based cache): the next tool call sees the new state immediately.
+
 ---
 
 ## Project Structure
