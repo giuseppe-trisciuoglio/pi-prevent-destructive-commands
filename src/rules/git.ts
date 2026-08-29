@@ -1,6 +1,5 @@
 /** Detects destructive Git operations (`git reset --hard`, `git push --force`, ...). */
 
-import { ENABLE_GIT_ADD_COMMIT_BLOCK } from "../config";
 import { type CheckResult, SAFE, block } from "./types";
 
 const GIT_GLOBAL_FLAGS_WITH_ARG: ReadonlySet<string> = new Set([
@@ -38,7 +37,7 @@ function findGitSubcommandIndex(tokens: string[], start: number): number {
 	return -1;
 }
 
-export function checkGit(tokens: string[], i: number): CheckResult {
+export function checkGit(tokens: string[], i: number, gitGuardsEnabled: boolean): CheckResult {
 	const subIndex = findGitSubcommandIndex(tokens, i);
 	if (subIndex === -1) return SAFE;
 	const sub = tokens[subIndex];
@@ -51,6 +50,8 @@ export function checkGit(tokens: string[], i: number): CheckResult {
 		return block("git clean removes untracked files (use -n for a dry run first)");
 	}
 	if (sub === "push") {
+		// Forceful and deleting pushes stay blocked unconditionally: they are
+		// destructive regardless of any per-project opt-out.
 		if (rest.includes("--force") || rest.includes("-f")) {
 			return block("git push --force overwrites remote history (destructive)");
 		}
@@ -59,6 +60,9 @@ export function checkGit(tokens: string[], i: number): CheckResult {
 		}
 		if (rest.includes("--delete")) {
 			return block("git push --delete removes remote branches/tags");
+		}
+		if (gitGuardsEnabled) {
+			return block("git push publishes commits to the remote repository");
 		}
 	}
 	if (sub === "branch" && rest.includes("-D")) {
@@ -82,10 +86,10 @@ export function checkGit(tokens: string[], i: number): CheckResult {
 	if (sub === "update-ref" && (rest.includes("-d") || rest.includes("--delete"))) {
 		return block("git update-ref -d directly deletes git references");
 	}
-	if (ENABLE_GIT_ADD_COMMIT_BLOCK && sub === "add") {
+	if (gitGuardsEnabled && sub === "add") {
 		return block("git add stages changes to the index");
 	}
-	if (ENABLE_GIT_ADD_COMMIT_BLOCK && sub === "commit") {
+	if (gitGuardsEnabled && sub === "commit") {
 		return block("git commit creates new commits in the repository");
 	}
 	return SAFE;

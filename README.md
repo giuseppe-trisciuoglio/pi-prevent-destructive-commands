@@ -29,8 +29,9 @@ All rules are defined in [`src/config.ts`](src/config.ts) and can be customized.
 | Category | Examples |
 |----------|----------|
 | **Destructive Git** | `git reset --hard`, `git clean`, `git push --force` / `-f` / `--delete`, `git branch -D`, `git tag -d`, `git checkout -f`, `git rebase`, `git filter-branch`, `git filter-repo`, `git reflog expire`, `git update-ref -d` |
-| **Git add/commit** | `git add`, `git commit` *(see `ENABLE_GIT_ADD_COMMIT_BLOCK` flag)* |
+| **Git add/commit/push** | `git add`, `git commit`, `git push` *(see `ENABLE_GIT_ADD_COMMIT_BLOCK` flag and the per-project opt-out below; force/delete push variants are always blocked)* |
 | **rm / path-sensitive** | `rm`, `rmdir`, `shred`, `unlink` targeting paths **outside** the working directory (e.g., `/etc`, `~`, `..`). Targets inside cwd are allowed. |
+| **find outside cwd** | `find` whose search root is **outside** the working directory (e.g., `find /etc`, `find ~`, `find ..`). Search roots inside cwd are allowed; `-exec` payloads are analyzed recursively as before. |
 | **Destructive Docker** | `docker rm` / `rmi`, `docker container/image/volume/network rm`, `docker * prune`, `docker compose down -v`, `docker compose rm`, `docker context rm`, `docker swarm leave --force` |
 | **Destructive AWS CLI** | `aws s3 rm`, `aws ec2 terminate-instances`, `aws rds delete-db-instance`, `aws cloudformation delete-stack`, and 50+ more subcommands (full list in `src/config.ts`) |
 | **Sensitive file reads** | `cat`, `grep`, etc. on `.env`, SSH keys, `.pem` files — **disabled by default** via `ENABLE_SENSITIVE_FILE_CHECK` *(see Configuration)* |
@@ -81,7 +82,7 @@ Edit the constants in [`src/config.ts`](src/config.ts) to tune protection:
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `ENABLE_GIT_ADD_COMMIT_BLOCK` | `true` | Blocks `git add` and `git commit`. Set to `false` if you want the agent to create commits autonomously. |
+| `ENABLE_GIT_ADD_COMMIT_BLOCK` | `true` | Blocks `git add`, `git commit`, and plain `git push`. Set to `false` if you want the agent to commit and push autonomously; can be overridden per project via `.pi/prevent-destructive-commands.json` (see below). |
 | `ENABLE_SENSITIVE_FILE_CHECK` | `false` | Blocks reading of sensitive files (`.env`, SSH keys, credentials). Disabled by default due to false positives from substring matching (`config` matches `tsconfig`, `vite.config`; `.env` matches `.environment.ts`). Enable only if needed and consider refining `SENSITIVE_FILE_PATTERNS`. |
 | `MAX_NESTING_DEPTH` | `5` | Maximum command nesting depth before treating as obfuscated. |
 
@@ -90,6 +91,31 @@ After any change, reload the extension:
 ```bash
 pi /reload
 ```
+
+### Per-Project Opt-Out
+
+Create `.pi/prevent-destructive-commands.json` in the project root to disable the `git add` / `git commit` / `git push` guards **for that project only**:
+
+```json
+{
+	"disableGitGuards": true
+}
+```
+
+Or use the `/git-guards` slash command from the pi TUI:
+
+| Command | Effect |
+|---------|--------|
+| `/git-guards` | Show whether the guards are active for the current project, and the state of the opt-out file. |
+| `/git-guards off` | Write `{"disableGitGuards": true}` (unrelated JSON keys are preserved). |
+| `/git-guards on` | Write `{"disableGitGuards": false}`. |
+
+Notes:
+
+- Forceful and deleting push variants (`--force`, `-f`, `--force-with-lease`, `-d`, `--delete`) are **always blocked** and cannot be opted out.
+- There is no global fallback: the file only applies to the project it lives in. A missing or invalid file keeps the guards active (safe default).
+- The file is user-managed: the agent is blocked from creating or editing it via writing tools or bash. `/git-guards` is exempt because it runs only on explicit user invocation in the extension process.
+- Changes are picked up live (mtime-based cache): the next tool call sees the new state immediately.
 
 ---
 
