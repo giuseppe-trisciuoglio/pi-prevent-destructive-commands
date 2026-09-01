@@ -1,6 +1,7 @@
 import { isToolCallEventType, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { relative } from "node:path";
 import { checkCommand } from "./checker";
+import { ENABLE_GIT_ADD_COMMIT_BLOCK } from "./config";
 import {
 	DRIZZLE_MIGRATION_BLOCK_REASON,
 	findDrizzleMigrationDirectories,
@@ -8,7 +9,16 @@ import {
 	isPotentialMigrationMutation,
 } from "./migration-guard";
 import { findNxConfigurationMutation, NX_CONFIG_BLOCK_REASON } from "./nx-guard";
+import {
+	CONFIG_MUTATING_COMMAND,
+	DEFAULT_PROJECT_CONFIG,
+	PROJECT_CONFIG_BLOCK_REASON,
+	PROJECT_CONFIG_RELATIVE_PATH,
+	commandReferencesProjectConfig,
+	loadProjectConfig,
+} from "./project-config";
 import { tokenize } from "./tokenizer";
+import { registerGitGuardsCommand } from "./git-guards-command";
 
 function pathsFromPatch(patch: string): string[] {
 	const paths: string[] = [];
@@ -59,7 +69,30 @@ function commandReferencesMigrationPath(command: string, cwd: string, migrationD
 }
 
 export default function (pi: ExtensionAPI) {
+	registerGitGuardsCommand(pi);
+
 	pi.on("tool_call", async (event, ctx) => {
+		// The per-project opt-out file is user-only: the agent must never create
+		// or edit it, neither through the writing tools nor through bash.
+		if (isToolCallEventType("bash", event)) {
+			const command = event.input.command;
+			if (
+				typeof command === "string" &&
+				CONFIG_MUTATING_COMMAND.test(command) &&
+				commandReferencesProjectConfig(command)
+			) {
+				return { block: true, reason: PROJECT_CONFIG_BLOCK_REASON };
+			}
+		} else {
+			const input = event.input as Record<string, unknown>;
+			const touchedConfig = pathsWrittenByTool(event.toolName, input).some(
+				(path) => path.replaceAll("\\", "/").replace(/^\.\//, "") === PROJECT_CONFIG_RELATIVE_PATH,
+			);
+			if (touchedConfig) {
+				return { block: true, reason: PROJECT_CONFIG_BLOCK_REASON };
+			}
+		}
+
 		const nxConfigurationPath = await findNxConfigurationMutation(
 			event.toolName,
 			event.input as Record<string, unknown>,
@@ -97,7 +130,15 @@ export default function (pi: ExtensionAPI) {
 		const command = event.input.command;
 		if (typeof command !== "string" || command.length === 0) return undefined;
 
-		const { dangerous, reason } = checkCommand(command, ctx.cwd);
+		const projectConfig = ctx.cwd
+			? loadProjectConfig(ctx.cwd)
+			: DEFAULT_PROJECT_CONFIG;
+		const gitGuardsEnabled =
+			ENABLE_GIT_ADD_COMMIT_BLOCK && !projectConfig.disableGitGuards;
+
+		const { dangerous, reason } = checkCommand(command, ctx.cwd, 0, ctx.cwd, {
+			gitGuardsEnabled,
+		});
 		if (!dangerous) return undefined;
 
 		return {

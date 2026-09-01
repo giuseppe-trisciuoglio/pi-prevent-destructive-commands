@@ -27,10 +27,17 @@ import { checkDocker } from "./rules/docker";
 import { checkFileReading } from "./rules/file-reading";
 import { checkGit } from "./rules/git";
 import { checkPathSensitive } from "./rules/path-sensitive";
-import { resolvePath } from "./rules/path-utils";
+import { isOutsideCwd, resolvePath } from "./rules/path-utils";
 import { type CheckResult, SAFE, block } from "./rules/types";
 
 export type { CheckResult };
+
+/** Per-call behavior toggles, resolved once per tool call from the project config. */
+export interface CheckerOptions {
+	gitGuardsEnabled: boolean;
+}
+
+const DEFAULT_CHECKER_OPTIONS: CheckerOptions = { gitGuardsEnabled: true };
 
 /**
  * Heredoc-aware entry point for analyzing a raw command string.
@@ -49,6 +56,7 @@ export function checkCommand(
 	cwd: string,
 	depth = 0,
 	boundaryCwd: string = cwd,
+	options: CheckerOptions = DEFAULT_CHECKER_OPTIONS,
 ): CheckResult {
 	if (depth > MAX_NESTING_DEPTH) {
 		return block(
@@ -58,16 +66,16 @@ export function checkCommand(
 
 	const extraction = extractHeredocs(command);
 	if (extraction === null) {
-		return checkTokens(tokenize(command), cwd, depth, false, boundaryCwd);
+		return checkTokens(tokenize(command), cwd, depth, false, boundaryCwd, options);
 	}
 
 	const lineTokens = tokenize(extraction.text);
-	const result = checkTokens(lineTokens, cwd, depth, false, boundaryCwd);
+	const result = checkTokens(lineTokens, cwd, depth, false, boundaryCwd, options);
 	if (result.dangerous) return result;
 
 	if (extraction.bodies.length > 0 && lineTokens.some((t) => HEREDOC_EXECUTOR_COMMANDS.has(t))) {
 		for (const body of extraction.bodies) {
-			const r = checkCommand(body, cwd, depth + 1, boundaryCwd);
+			const r = checkCommand(body, cwd, depth + 1, boundaryCwd, options);
 			if (r.dangerous) return r;
 		}
 	}
@@ -94,6 +102,7 @@ export function checkTokens(
 	depth = 0,
 	stdinArgs = false,
 	boundaryCwd: string = cwd,
+	options: CheckerOptions = DEFAULT_CHECKER_OPTIONS,
 ): CheckResult {
 	if (depth > MAX_NESTING_DEPTH) {
 		return block(
@@ -181,7 +190,7 @@ export function checkTokens(
 					j++;
 					continue;
 				}
-				const r = checkCommand(arg, currentCwd ?? cwd, depth + 1, boundaryCwd);
+				const r = checkCommand(arg, currentCwd ?? cwd, depth + 1, boundaryCwd, options);
 				if (r.dangerous) return r;
 				break;
 			}
@@ -194,7 +203,7 @@ export function checkTokens(
 			let j = i + 1;
 			while (j < tokens.length) {
 				if (tokens[j] === "-c" && j + 1 < tokens.length) {
-					const r = checkCommand(tokens[j + 1], currentCwd ?? cwd, depth + 1, boundaryCwd);
+				const r = checkCommand(tokens[j + 1], currentCwd ?? cwd, depth + 1, boundaryCwd, options);
 					if (r.dangerous) return r;
 					break;
 				}
@@ -208,9 +217,30 @@ export function checkTokens(
 			continue;
 		}
 
-		// find -exec rm {} \;
+		// `find`: validate the start paths against the boundary directory, then
+		// recurse into any -exec delegate. Start paths are the consecutive
+		// non-flag tokens right after `find` (after skipping leading flags such
+		// as -L/-H/-P); the first option token ends the list.
 		if (token === "find") {
 			let j = i + 1;
+			while (j < tokens.length && tokens[j]?.startsWith("-")) {
+				j++;
+			}
+			while (j < tokens.length && !tokens[j]!.startsWith("-")) {
+				const startPath = tokens[j]!;
+				if (currentCwd === null || SHELL_OPERATORS.has(startPath)) {
+					return block(
+						`cannot verify ${JSON.stringify("find")}'s search root: a preceding "cd" changed the working directory to a location that could not be statically resolved`,
+					);
+				}
+				const r = isOutsideCwd(startPath, currentCwd, boundaryCwd);
+				if (r.dangerous) {
+					return block(
+						`${JSON.stringify("find")} searches outside the working directory — ${r.reason}`,
+					);
+				}
+				j++;
+			}
 			while (j < tokens.length) {
 				if (FIND_EXEC_FLAGS.has(tokens[j]) && j + 1 < tokens.length) {
 					let end = j + 2;
@@ -223,6 +253,7 @@ export function checkTokens(
 						depth + 1,
 						false,
 						boundaryCwd,
+						options,
 					);
 					if (r.dangerous) return r;
 				}
@@ -242,6 +273,7 @@ export function checkTokens(
 					depth + 1,
 					true,
 					boundaryCwd,
+					options,
 				);
 				if (r.dangerous) return r;
 			}
@@ -264,7 +296,7 @@ export function checkTokens(
 		}
 
 		if (token === "git") {
-			const r = checkGit(tokens, i);
+			const r = checkGit(tokens, i, options.gitGuardsEnabled);
 			if (r.dangerous) return r;
 			i++;
 			continue;
