@@ -13,6 +13,7 @@ import {
 	DELEGATION_COMMANDS,
 	FILE_READING_COMMANDS,
 	FIND_EXEC_FLAGS,
+	HEREDOC_EXECUTOR_COMMANDS,
 	MAX_NESTING_DEPTH,
 	PATH_SENSITIVE_COMMANDS,
 	QUOTED_COMMAND_WRAPPERS,
@@ -20,6 +21,7 @@ import {
 	SHELL_OPERATORS,
 	WRAPPER_COMMANDS,
 } from "./config";
+import { extractHeredocs } from "./heredoc";
 import { checkAws } from "./rules/aws";
 import { checkDocker } from "./rules/docker";
 import { checkFileReading } from "./rules/file-reading";
@@ -36,6 +38,50 @@ export interface CheckerOptions {
 }
 
 const DEFAULT_CHECKER_OPTIONS: CheckerOptions = { gitGuardsEnabled: true };
+
+/**
+ * Heredoc-aware entry point for analyzing a raw command string.
+ *
+ * A heredoc body is stdin data for the command carrying the `<<` redirect,
+ * not a command line: prose written through a heredoc would otherwise be
+ * tokenized as shell syntax, colliding with natural-language words that look
+ * like command names. The body is extracted and only analyzed as commands
+ * when the remaining command line contains an executor (a shell, interpreter,
+ * remote runner, …) that would actually run it. When extraction cannot parse
+ * the string unambiguously, the original string is analyzed whole — the exact
+ * pre-heredoc behavior.
+ */
+export function checkCommand(
+	command: string,
+	cwd: string,
+	depth = 0,
+	boundaryCwd: string = cwd,
+	options: CheckerOptions = DEFAULT_CHECKER_OPTIONS,
+): CheckResult {
+	if (depth > MAX_NESTING_DEPTH) {
+		return block(
+			"command nesting too deep to safely analyze (possible obfuscation)",
+		);
+	}
+
+	const extraction = extractHeredocs(command);
+	if (extraction === null) {
+		return checkTokens(tokenize(command), cwd, depth, false, boundaryCwd, options);
+	}
+
+	const lineTokens = tokenize(extraction.text);
+	const result = checkTokens(lineTokens, cwd, depth, false, boundaryCwd, options);
+	if (result.dangerous) return result;
+
+	if (extraction.bodies.length > 0 && lineTokens.some((t) => HEREDOC_EXECUTOR_COMMANDS.has(t))) {
+		for (const body of extraction.bodies) {
+			const r = checkCommand(body, cwd, depth + 1, boundaryCwd, options);
+			if (r.dangerous) return r;
+		}
+	}
+
+	return SAFE;
+}
 
 /**
  * @param cwd Directory relative paths resolve against for *this* call. At the top
@@ -144,7 +190,7 @@ export function checkTokens(
 					j++;
 					continue;
 				}
-				const r = checkTokens(tokenize(arg), currentCwd ?? cwd, depth + 1, false, boundaryCwd, options);
+				const r = checkCommand(arg, currentCwd ?? cwd, depth + 1, boundaryCwd, options);
 				if (r.dangerous) return r;
 				break;
 			}
@@ -157,14 +203,7 @@ export function checkTokens(
 			let j = i + 1;
 			while (j < tokens.length) {
 				if (tokens[j] === "-c" && j + 1 < tokens.length) {
-					const r = checkTokens(
-						tokenize(tokens[j + 1]),
-						currentCwd ?? cwd,
-						depth + 1,
-						false,
-						boundaryCwd,
-						options,
-					);
+				const r = checkCommand(tokens[j + 1], currentCwd ?? cwd, depth + 1, boundaryCwd, options);
 					if (r.dangerous) return r;
 					break;
 				}

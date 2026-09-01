@@ -1,6 +1,6 @@
 import { isToolCallEventType, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { relative } from "node:path";
-import { checkTokens } from "./checker";
+import { checkCommand } from "./checker";
 import { ENABLE_GIT_ADD_COMMIT_BLOCK } from "./config";
 import {
 	DRIZZLE_MIGRATION_BLOCK_REASON,
@@ -136,7 +136,7 @@ export default function (pi: ExtensionAPI) {
 		const gitGuardsEnabled =
 			ENABLE_GIT_ADD_COMMIT_BLOCK && !projectConfig.disableGitGuards;
 
-		const { dangerous, reason } = checkTokens(tokenize(command), ctx.cwd, 0, false, ctx.cwd, {
+		const { dangerous, reason } = checkCommand(command, ctx.cwd, 0, ctx.cwd, {
 			gitGuardsEnabled,
 		});
 		if (!dangerous) return undefined;
