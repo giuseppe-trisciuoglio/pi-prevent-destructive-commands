@@ -45,6 +45,15 @@ The analyzer traverses common command wrappers and nested structures so a destru
 - **Execution delegation**: `find -exec`, `xargs`, `parallel`
 - **Quoted wrappers**: `watch "rm foo"`, `strace "..."`
 - **Pipelines & chains**: `|`, `&&`, `||`, `;`
+- **Executed heredoc bodies**: `bash <<'EOF' ... EOF`, `cat <<EOF | python3`, `ssh host <<EOF` — the body is stdin data, so it is only analyzed as commands when the command line contains an executor (shell, interpreter, `ssh`, `xargs`, ...) that would actually run it
+
+### Heredoc Handling
+
+A heredoc body (`cat > notes.md <<'EOF' ... EOF`) is **data written to stdin, not a command line**, so it is not token-analyzed as shell syntax. This prevents false positives from natural language: e.g. Italian prose containing `del` (the Windows delete command name) followed by a markdown glob or an absolute path mentioned in the text.
+
+When the command line carrying the heredoc contains an **executor** — a shell (`bash`, `sh`, ...), `xargs`/`parallel`, an interpreter (`python`, `node`, `ruby`, ...), `ssh`, `awk`/`sed`/`ed`, `crontab`, `sqlite3`/`psql`/`mysql`, and similar (full list in `HEREDOC_EXECUTOR_COMMANDS` in `src/config.ts`) — the body *is* still analyzed as commands, because it will actually be executed. This covers `bash <<EOF`, `cat <<EOF | bash`, and remote execution via `ssh`.
+
+Anything the extractor cannot parse unambiguously (here-strings `<<<`, variable delimiters `<<$D`, missing terminator, mid-word quoting) falls back to analyzing the whole string exactly as before — the guard stays strict rather than guessing.
 
 ---
 
@@ -138,6 +147,7 @@ Standalone tests for the tokenizer/checker logic (no dependency on pi itself):
 
 ```bash
 npm run test:smoke
+npm run test:heredoc
 npm run test:nx-guard
 
 # Or directly with tsx
@@ -174,6 +184,7 @@ The test suite covers:
 - `find -exec` and `xargs` delegation
 - Pipeline and concatenation handling
 - Git global flag parsing (`-C`, `--git-dir`)
+- Heredoc bodies: prose through data sinks is allowed, executed bodies (`bash <<EOF`, `cat <<EOF | bash`, `ssh`, interpreters) are still blocked, unparseable heredocs fall back to whole-string analysis
 - Edge cases and safe command verification
 
 ---
@@ -197,10 +208,11 @@ Two cases that used to be listed here are now handled:
 
 When pi attempts to execute a bash command, this extension intercepts the `tool_call` event and:
 
-1. **Tokenizes** the command string using a shlex-like shell tokenizer that respects quotes and escapes.
-2. **Analyzes** the token stream recursively, traversing wrappers, shell invocations, and pipelines.
-3. **Blocks** if any destructive pattern is detected, returning a clear reason to the agent.
-4. **Allows** safe commands to pass through without modification.
+1. **Extracts heredoc bodies** so prose fed through `cat > file <<'EOF'` is treated as data, keeping bodies under analysis only when an executor on the command line would run them.
+2. **Tokenizes** the command string using a shlex-like shell tokenizer that respects quotes and escapes.
+3. **Analyzes** the token stream recursively, traversing wrappers, shell invocations, and pipelines.
+4. **Blocks** if any destructive pattern is detected, returning a clear reason to the agent.
+5. **Allows** safe commands to pass through without modification.
 
 The agent never receives an interactive prompt — the block is final and must be handled by finding a safe alternative.
 

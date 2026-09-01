@@ -224,6 +224,46 @@ export const SHELL_COMMANDS: ReadonlySet<string> = new Set([
 /** Commands that pipe their arguments as a new command. */
 export const DELEGATION_COMMANDS: ReadonlySet<string> = new Set(["xargs", "parallel"]);
 
+/**
+ * Commands for which a heredoc on the command line means the body is *executed*
+ * (as a shell script, program, editor script, remote command, …) rather than
+ * being consumed as plain data. When one of these appears on a command line
+ * that carries a heredoc, the body is still analyzed as a command; otherwise
+ * the body is treated as data and skipped. Shells and delegation commands are
+ * included automatically. Kept deliberately generous: listing a harmless
+ * command here only costs some analysis of the body, never a bypass.
+ */
+export const HEREDOC_EXECUTOR_COMMANDS: ReadonlySet<string> = new Set([
+	...SHELL_COMMANDS,
+	...DELEGATION_COMMANDS,
+	".",
+	"eval",
+	"exec",
+	"source",
+	"awk",
+	"sed",
+	"ed",
+	"ex",
+	"python",
+	"python2",
+	"python3",
+	"node",
+	"ruby",
+	"perl",
+	"php",
+	"lua",
+	"Rscript",
+	"osascript",
+	"powershell",
+	"pwsh",
+	"expect",
+	"ssh",
+	"crontab",
+	"sqlite3",
+	"psql",
+	"mysql",
+]);
+
 /** `find` flags that delegate execution. */
 export const FIND_EXEC_FLAGS: ReadonlySet<string> = new Set([
 	"-exec",

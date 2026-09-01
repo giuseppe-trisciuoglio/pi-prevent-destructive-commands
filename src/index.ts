@@ -1,6 +1,6 @@
 import { isToolCallEventType, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { relative } from "node:path";
-import { checkTokens } from "./checker";
+import { checkCommand } from "./checker";
 import {
 	DRIZZLE_MIGRATION_BLOCK_REASON,
 	findDrizzleMigrationDirectories,
@@ -97,7 +97,7 @@ export default function (pi: ExtensionAPI) {
 		const command = event.input.command;
 		if (typeof command !== "string" || command.length === 0) return undefined;
 
-		const { dangerous, reason } = checkTokens(tokenize(command), ctx.cwd);
+		const { dangerous, reason } = checkCommand(command, ctx.cwd);
 		if (!dangerous) return undefined;
 
 		return {
