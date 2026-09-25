@@ -25,6 +25,7 @@ import { extractHeredocs } from "./heredoc";
 import { checkAws } from "./rules/aws";
 import { checkDocker } from "./rules/docker";
 import { checkFileReading } from "./rules/file-reading";
+import { checkGh } from "./rules/gh";
 import { checkGit } from "./rules/git";
 import { checkPathSensitive } from "./rules/path-sensitive";
 import { isOutsideCwd, resolvePath } from "./rules/path-utils";
@@ -84,6 +85,9 @@ export function checkCommand(
 }
 
 /**
+ * Checks tokenized commands, including nested delegates, for reasons to block.
+ * Returns a blocking result with the first reason found, or `SAFE` otherwise.
+ *
  * @param cwd Directory relative paths resolve against for *this* call. At the top
  *   level this is the real working directory; recursive calls pass the effective
  *   `currentCwd` tracked at the point of recursion (see the `cd` handling below).
@@ -290,6 +294,13 @@ export function checkTokens(
 
 		if (token === "docker") {
 			const r = checkDocker(tokens, i);
+			if (r.dangerous) return r;
+			i++;
+			continue;
+		}
+
+		if (token === "gh") {
+			const r = checkGh(tokens, i);
 			if (r.dangerous) return r;
 			i++;
 			continue;

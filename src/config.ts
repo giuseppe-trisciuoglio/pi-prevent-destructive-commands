@@ -184,6 +184,32 @@ export const DOCKER_DESTRUCTIVE_COMPOUND: ReadonlySet<string> = new Set([
 ]);
 
 // =============================================================================
+// GitHub CLI Destructive Operations
+// =============================================================================
+
+/**
+ * HTTP methods that make a `gh api` call destructive (resource deletion or
+ * irreversible mutation), accepted in both short (`-X DELETE`) and long
+ * (`--method DELETE`) form, in any position of the command line.
+ */
+export const GH_DESTRUCTIVE_METHODS: ReadonlySet<string> = new Set(["DELETE"]);
+
+/**
+ * Destructive `gh` subcommands, matched as "<noun> <verb>".
+ */
+export const GH_DESTRUCTIVE_SUBCOMMANDS: ReadonlySet<string> = new Set([
+	"repo delete",
+	"repo rename",
+	"release delete",
+	"gist delete",
+	"secret delete",
+	"variable delete",
+	"label delete",
+	"workflow disable",
+	"run delete",
+]);
+
+// =============================================================================
 // Wrapper / Delegation Commands
 // =============================================================================
 
