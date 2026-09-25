@@ -25,6 +25,7 @@ import { extractHeredocs } from "./heredoc";
 import { checkAws } from "./rules/aws";
 import { checkDocker } from "./rules/docker";
 import { checkFileReading } from "./rules/file-reading";
+import { checkGh } from "./rules/gh";
 import { checkGit } from "./rules/git";
 import { checkPathSensitive } from "./rules/path-sensitive";
 import { isOutsideCwd, resolvePath } from "./rules/path-utils";
@@ -290,6 +291,13 @@ export function checkTokens(
 
 		if (token === "docker") {
 			const r = checkDocker(tokens, i);
+			if (r.dangerous) return r;
+			i++;
+			continue;
+		}
+
+		if (token === "gh") {
+			const r = checkGh(tokens, i);
 			if (r.dangerous) return r;
 			i++;
 			continue;
