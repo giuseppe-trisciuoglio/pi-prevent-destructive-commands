@@ -85,6 +85,9 @@ export function checkCommand(
 }
 
 /**
+ * Checks tokenized commands, including nested delegates, for reasons to block.
+ * Returns a blocking result with the first reason found, or `SAFE` otherwise.
+ *
  * @param cwd Directory relative paths resolve against for *this* call. At the top
  *   level this is the real working directory; recursive calls pass the effective
  *   `currentCwd` tracked at the point of recursion (see the `cd` handling below).
