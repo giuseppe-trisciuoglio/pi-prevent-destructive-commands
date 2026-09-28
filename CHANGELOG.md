@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-09-28
+
 ### Added
 
 - New guard: destructive GitHub CLI commands are blocked. `gh api` calls carrying a destructive method (`gh api -X DELETE ...`, `gh api --method DELETE ...`, including the `--method=DELETE` form) and destructive `gh` subcommands (`gh repo delete`, `gh repo rename`, `gh release delete`, `gh gist delete`, `gh secret delete`, `gh variable delete`, `gh label delete`, `gh workflow disable`, `gh run delete`) are stopped before execution. Safe `gh` usage (`gh api` GET/POST, `gh pr view`, ...) remains allowed. Adds `test/gh-guard-test.ts` (`npm run test:gh-guard`).
@@ -69,7 +71,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - No interactive confirmation — protection works in non-interactive modes (`-p`, JSON, RPC).
 - Maximum nesting depth limit (5) to prevent obfuscation attacks.
 
-[Unreleased]: https://github.com/giuseppe-trisciuoglio/pi-prevent-destructive-commands/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/giuseppe-trisciuoglio/pi-prevent-destructive-commands/compare/v1.2.0...HEAD
+
+[1.2.0]: https://github.com/giuseppe-trisciuoglio/pi-prevent-destructive-commands/compare/v1.1.0...v1.2.0
 
 [1.1.0]: https://github.com/giuseppe-trisciuoglio/pi-prevent-destructive-commands/compare/v1.0.1...v1.1.0
 
