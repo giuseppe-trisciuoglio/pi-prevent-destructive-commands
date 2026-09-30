@@ -4,51 +4,18 @@
  *   npx tsx test/git-guards-command-test.ts
  */
 
-import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { readFileSync } from "node:fs";
+import { existsSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { checkTokens } from "../src/checker";
 import { registerGitGuardsCommand } from "../src/git-guards-command";
 import {
 	applyGitGuards,
 	gitGuardsStatus,
 	parseGitGuardsArgs,
 } from "../src/git-guards-command";
-import {
-	PROJECT_CONFIG_RELATIVE_PATH,
-	loadProjectConfig,
-	resetProjectConfigCache,
-} from "../src/project-config";
-import { tokenize } from "../src/tokenizer";
+import { PROJECT_CONFIG_RELATIVE_PATH, loadProjectConfig } from "../src/project-config";
+import { check, checkFailures, isBlocked, makeProject } from "./helpers";
 
-let failures = 0;
-
-function check(name: string, actual: unknown, expected: unknown) {
-	const ok = JSON.stringify(actual) === JSON.stringify(expected);
-	if (!ok) {
-		failures++;
-		console.error(`✗ ${name}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
-	} else {
-		console.log(`✓ ${name}`);
-	}
-}
-
-function makeProject(content?: string): string {
-	const dir = mkdtempSync(join(tmpdir(), "pdc-git-guards-cmd-"));
-	if (content !== undefined) {
-		mkdirSync(join(dir, ".pi"), { recursive: true });
-		writeFileSync(join(dir, ...PROJECT_CONFIG_RELATIVE_PATH.split("/")), content);
-	}
-	resetProjectConfigCache();
-	return dir;
-}
-
-function isBlocked(command: string, cwd: string, gitGuardsEnabled: boolean): boolean {
-	return checkTokens(tokenize(command), cwd, 0, false, cwd, { gitGuardsEnabled }).dangerous;
-}
-
-// ─── parseGitGuardsArgs ──────────────────────────────────────────────────────
+// ─── parseGitGuardsArgs ───────────────────────────────────────────────────────
 
 check("no args → status", parseGitGuardsArgs(""), "status");
 check("'  ' → status", parseGitGuardsArgs("   "), "status");
@@ -195,8 +162,8 @@ rmSync(commandProject, { recursive: true, force: true });
 
 rmSync(noFile, { recursive: true, force: true });
 
-if (failures > 0) {
-	console.error(`\n${failures} git-guards command test(s) failed.`);
+if (checkFailures() > 0) {
+	console.error(`\n${checkFailures()} git-guards command test(s) failed.`);
 	process.exit(1);
 } else {
 	console.log("\nAll git-guards command tests passed.");

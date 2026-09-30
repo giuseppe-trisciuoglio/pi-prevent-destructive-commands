@@ -4,45 +4,16 @@
  *   npx tsx test/project-config-test.ts
  */
 
-import { mkdtempSync, mkdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { rmSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { checkTokens } from "../src/checker";
 import {
 	CONFIG_MUTATING_COMMAND,
 	DEFAULT_PROJECT_CONFIG,
 	PROJECT_CONFIG_RELATIVE_PATH,
 	commandReferencesProjectConfig,
 	loadProjectConfig,
-	resetProjectConfigCache,
 } from "../src/project-config";
-import { tokenize } from "../src/tokenizer";
-
-let failures = 0;
-
-function check(name: string, actual: unknown, expected: unknown) {
-	const ok = JSON.stringify(actual) === JSON.stringify(expected);
-	if (!ok) {
-		failures++;
-		console.error(`✗ ${name}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
-	} else {
-		console.log(`✓ ${name}`);
-	}
-}
-
-function makeProject(content?: string): string {
-	const dir = mkdtempSync(join(tmpdir(), "pdc-project-config-"));
-	if (content !== undefined) {
-		mkdirSync(join(dir, ".pi"), { recursive: true });
-		writeFileSync(join(dir, ...PROJECT_CONFIG_RELATIVE_PATH.split("/")), content);
-	}
-	resetProjectConfigCache();
-	return dir;
-}
-
-function isBlocked(command: string, cwd: string, gitGuardsEnabled: boolean): boolean {
-	return checkTokens(tokenize(command), cwd, 0, false, cwd, { gitGuardsEnabled }).dangerous;
-}
+import { check, checkFailures, isBlocked, makeProject } from "./helpers";
 
 // ─── loadProjectConfig ───────────────────────────────────────────────────────
 
@@ -133,5 +104,5 @@ for (const command of harmless) {
 	);
 }
 
-console.log(failures === 0 ? "\nAll project-config tests passed." : `\n${failures} test(s) failed.`);
-process.exit(failures === 0 ? 0 : 1);
+console.log(checkFailures() === 0 ? "\nAll project-config tests passed." : `\n${checkFailures()} test(s) failed.`);
+process.exit(checkFailures() === 0 ? 0 : 1);
