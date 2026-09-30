@@ -16,9 +16,14 @@ export const PROJECT_CONFIG_RELATIVE_PATH = ".pi/prevent-destructive-commands.js
 export interface ProjectConfig {
 	/** When true, the `git add` / `git commit` / `git push` guards are disabled. */
 	disableGitGuards: boolean;
+	/** When true, the source comment guard is disabled. */
+	disableCommentGuard: boolean;
 }
 
-export const DEFAULT_PROJECT_CONFIG: ProjectConfig = { disableGitGuards: false };
+export const DEFAULT_PROJECT_CONFIG: ProjectConfig = {
+	disableGitGuards: false,
+	disableCommentGuard: false,
+};
 
 /** Absolute path of the project configuration file for a given cwd. */
 export function projectConfigPath(cwd: string): string {
@@ -56,8 +61,8 @@ export function loadProjectConfig(cwd: string): ProjectConfig {
 		const raw: unknown = JSON.parse(readFileSync(path, "utf8"));
 		if (typeof raw === "object" && raw !== null) {
 			config = {
-				disableGitGuards:
-					(raw as Record<string, unknown>).disableGitGuards === true,
+				disableGitGuards: (raw as Record<string, unknown>).disableGitGuards === true,
+				disableCommentGuard: (raw as Record<string, unknown>).disableCommentGuard === true,
 			};
 		}
 	} catch {

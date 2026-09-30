@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- New guard: new comments in source files are blocked. Any tool call that would introduce a new comment into a source file (Java, TypeScript/JavaScript, Dart, Go, Rust, C/C++, C#, Swift, Kotlin, Scala, PHP, CSS/SCSS, Python, Ruby, shell, YAML, TOML, Terraform, GraphQL, SQL, Lua, Haskell, Elm, HTML/XML/SVG/Markdown) is stopped, covering `write`, `edit`, `apply_patch` (unified diff and `*** Begin Patch` formats), and bash write vectors (`cat > a.ts <<EOF`, `tee b.py <<EOF`, `echo "// x" >> c.ts`). Detection is string-aware (comment markers inside string literals are not comments), comments a file already contains may be carried over untouched, and shebang lines, tooling directives (`@ts-ignore`, `eslint-disable`, `biome-ignore`, `noqa`, …) and purely decorative lines are exempt. Opt out per project with `{"disableCommentGuard": true}` in the opt-out file. Adds `test/comment-guard-test.ts` (`npm run test:comment-guard`).
+
 ## [1.2.0] - 2026-09-28
 
 ### Added

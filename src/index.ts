@@ -1,6 +1,7 @@
 import { isToolCallEventType, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { relative } from "node:path";
 import { checkCommand } from "./checker";
+import { findNewSourceComments, sourceCommentBlockReason } from "./comment-guard";
 import { ENABLE_GIT_ADD_COMMIT_BLOCK } from "./config";
 import {
 	DRIZZLE_MIGRATION_BLOCK_REASON,
@@ -102,6 +103,21 @@ export default function (pi: ExtensionAPI) {
 			return { block: true, reason: NX_CONFIG_BLOCK_REASON };
 		}
 
+		const projectConfig = ctx.cwd
+			? loadProjectConfig(ctx.cwd)
+			: DEFAULT_PROJECT_CONFIG;
+
+		if (!projectConfig.disableCommentGuard) {
+			const commentViolation = await findNewSourceComments(
+				event.toolName,
+				event.input as Record<string, unknown>,
+				ctx.cwd,
+			);
+			if (commentViolation) {
+				return { block: true, reason: sourceCommentBlockReason(commentViolation) };
+			}
+		}
+
 		const migrationDirectories = await findDrizzleMigrationDirectories(ctx.cwd);
 
 		if (migrationDirectories.length > 0) {
@@ -130,9 +146,6 @@ export default function (pi: ExtensionAPI) {
 		const command = event.input.command;
 		if (typeof command !== "string" || command.length === 0) return undefined;
 
-		const projectConfig = ctx.cwd
-			? loadProjectConfig(ctx.cwd)
-			: DEFAULT_PROJECT_CONFIG;
 		const gitGuardsEnabled =
 			ENABLE_GIT_ADD_COMMIT_BLOCK && !projectConfig.disableGitGuards;
 

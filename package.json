@@ -32,7 +32,7 @@
     "node": ">=18.0.0"
   },
   "scripts": {
-    "test": "npm run test:smoke && npm run test:heredoc && npm run test:migration-guard && npm run test:nx-guard && npm run test:project-config && npm run test:find-start-path && npm run test:git-guards-command && npm run test:gh-guard && npm run test:e2e",
+    "test": "npm run test:smoke && npm run test:heredoc && npm run test:migration-guard && npm run test:nx-guard && npm run test:project-config && npm run test:find-start-path && npm run test:git-guards-command && npm run test:gh-guard && npm run test:comment-guard && npm run test:e2e",
     "test:smoke": "npx tsx test/smoke-test.ts",
     "test:heredoc": "npx tsx test/heredoc-test.ts",
     "test:e2e": "npx tsx test/e2e-install-test.ts",
@@ -42,6 +42,7 @@
     "test:find-start-path": "npx tsx test/find-start-path-test.ts",
     "test:git-guards-command": "npx tsx test/git-guards-command-test.ts",
     "test:gh-guard": "npx tsx test/gh-guard-test.ts",
+    "test:comment-guard": "npx tsx test/comment-guard-test.ts",
     "lint": "tsc --noEmit",
     "typecheck": "tsc --noEmit"
   },
