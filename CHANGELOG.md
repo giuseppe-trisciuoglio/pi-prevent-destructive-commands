@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Internal refactor to remove duplicated code blocks (jscpd, min 50 tokens): token-scanning helpers (`forEachPositionalArg`, `collectPositionalParts`, `matchLongestSubcommand`) extracted to `src/rules/args.ts` and reused by the checker, the sensitive-file rule, and the AWS/GitHub CLI rules; patch-path extraction and tool-write mapping moved to shared `src/patch-paths.ts` (used by both `src/index.ts` and `src/nx-guard.ts`); duplicated test utilities (`check`, `makeProject`, `isBlocked`, case runner) consolidated into `test/helpers.ts`. No behavioral changes; full test suite and typecheck pass.
+
 ## [1.2.0] - 2026-09-28
 
 ### Added

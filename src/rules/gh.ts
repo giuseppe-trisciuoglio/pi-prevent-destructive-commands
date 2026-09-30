@@ -1,6 +1,7 @@
 /** Detects destructive GitHub CLI operations (`gh api -X DELETE`, `gh repo delete`, ...). */
 
 import { GH_DESTRUCTIVE_METHODS, GH_DESTRUCTIVE_SUBCOMMANDS } from "../config";
+import { collectPositionalParts, matchLongestSubcommand } from "./args";
 import { type CheckResult, SAFE, block } from "./types";
 
 /**
@@ -28,17 +29,10 @@ export function checkGh(tokens: string[], i: number): CheckResult {
 	}
 
 	// `gh <noun> <verb>`: match the longest known destructive subcommand pair.
-	const parts: string[] = [];
-	let j = i + 1;
-	while (j < tokens.length && !tokens[j].startsWith("-") && parts.length < 2) {
-		parts.push(tokens[j]);
-		j++;
-	}
-	for (let length = parts.length; length > 0; length--) {
-		const sub = parts.slice(0, length).join(" ");
-		if (GH_DESTRUCTIVE_SUBCOMMANDS.has(sub)) {
-			return block(`destructive GitHub CLI operation: gh ${sub}`);
-		}
+	const parts = collectPositionalParts(tokens, i + 1, 2);
+	const sub = matchLongestSubcommand(parts, GH_DESTRUCTIVE_SUBCOMMANDS);
+	if (sub !== null) {
+		return block(`destructive GitHub CLI operation: gh ${sub}`);
 	}
 	return SAFE;
 }

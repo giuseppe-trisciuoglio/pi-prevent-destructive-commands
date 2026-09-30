@@ -26,6 +26,7 @@ import { checkAws } from "./rules/aws";
 import { checkDocker } from "./rules/docker";
 import { checkFileReading } from "./rules/file-reading";
 import { checkGh } from "./rules/gh";
+import { forEachPositionalArg } from "./rules/args";
 import { checkGit } from "./rules/git";
 import { checkPathSensitive } from "./rules/path-sensitive";
 import { isOutsideCwd, resolvePath } from "./rules/path-utils";
@@ -186,18 +187,15 @@ export function checkTokens(
 
 		// Quoted-command wrappers: the first positional argument is a command
 		if (QUOTED_COMMAND_WRAPPERS.has(token)) {
-			let j = i + 1;
-			while (j < tokens.length) {
-				const arg = tokens[j];
-				if (!arg || SHELL_OPERATORS.has(arg)) break;
-				if (arg.startsWith("-")) {
-					j++;
-					continue;
-				}
+			let blocked: CheckResult | null = null;
+			forEachPositionalArg(tokens, i, (arg) => {
 				const r = checkCommand(arg, currentCwd ?? cwd, depth + 1, boundaryCwd, options);
-				if (r.dangerous) return r;
-				break;
-			}
+				if (r.dangerous) {
+					blocked = r;
+					return false;
+				}
+			});
+			if (blocked !== null) return blocked;
 			i++;
 			continue;
 		}

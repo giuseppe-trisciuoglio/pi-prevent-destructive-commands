@@ -5,16 +5,11 @@
  */
 
 import { checkCommand } from "../src/checker";
+import { runCheckCases, type CheckCase } from "./helpers";
 
 const CWD = "/home/user/projects/demo";
 
-interface Case {
-	command: string;
-	expectBlocked: boolean;
-	note?: string;
-}
-
-const cases: Case[] = [
+const cases: CheckCase[] = [
 	// ─── Heredoc bodies are data, not command lines ───────────────────────────
 	{
 		command: `cat > docs/nota.md <<'EOF'
@@ -153,25 +148,4 @@ $DELIM`,
 	},
 ];
 
-let passed = 0;
-let failed = 0;
-
-for (const c of cases) {
-	const result = checkCommand(c.command, CWD);
-	const blocked = result.dangerous;
-	const ok = blocked === c.expectBlocked;
-	const status = ok ? "PASS" : "FAIL";
-	if (ok) passed++;
-	else failed++;
-	const tag = c.expectBlocked ? "block " : "allow";
-	const note = c.note ? `  (${c.note})` : "";
-	const reason = blocked && !ok ? `  -> ${result.reason}` : "";
-	const firstLine = c.command.split("\n")[0];
-	console.log(`${status}  [${tag}]  ${firstLine}${note}${reason}`);
-}
-
-console.log("");
-console.log(`Result: ${passed} passed, ${failed} failed out of ${cases.length} cases.`);
-if (failed > 0) {
-	process.exit(1);
-}
+runCheckCases(cases, (command) => checkCommand(command, CWD), (command) => command.split("\n")[0]);

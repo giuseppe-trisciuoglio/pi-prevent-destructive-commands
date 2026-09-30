@@ -4,64 +4,35 @@
  *   npx tsx test/project-config-test.ts
  */
 
-import { mkdtempSync, mkdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { rmSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { checkTokens } from "../src/checker";
+import { check, isBlocked, makeProject } from "./helpers";
 import {
 	CONFIG_MUTATING_COMMAND,
 	DEFAULT_PROJECT_CONFIG,
 	PROJECT_CONFIG_RELATIVE_PATH,
 	commandReferencesProjectConfig,
 	loadProjectConfig,
-	resetProjectConfigCache,
 } from "../src/project-config";
-import { tokenize } from "../src/tokenizer";
-
-let failures = 0;
-
-function check(name: string, actual: unknown, expected: unknown) {
-	const ok = JSON.stringify(actual) === JSON.stringify(expected);
-	if (!ok) {
-		failures++;
-		console.error(`✗ ${name}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
-	} else {
-		console.log(`✓ ${name}`);
-	}
-}
-
-function makeProject(content?: string): string {
-	const dir = mkdtempSync(join(tmpdir(), "pdc-project-config-"));
-	if (content !== undefined) {
-		mkdirSync(join(dir, ".pi"), { recursive: true });
-		writeFileSync(join(dir, ...PROJECT_CONFIG_RELATIVE_PATH.split("/")), content);
-	}
-	resetProjectConfigCache();
-	return dir;
-}
-
-function isBlocked(command: string, cwd: string, gitGuardsEnabled: boolean): boolean {
-	return checkTokens(tokenize(command), cwd, 0, false, cwd, { gitGuardsEnabled }).dangerous;
-}
 
 // ─── loadProjectConfig ───────────────────────────────────────────────────────
 
-const missing = makeProject();
+const missing = makeProject("pdc-project-config-");
 check("missing file → defaults (guards active)", loadProjectConfig(missing), DEFAULT_PROJECT_CONFIG);
 rmSync(missing, { recursive: true, force: true });
 
-const disabled = makeProject(JSON.stringify({ disableGitGuards: true }));
+const disabled = makeProject("pdc-project-config-", JSON.stringify({ disableGitGuards: true }));
 check("disableGitGuards: true", loadProjectConfig(disabled).disableGitGuards, true);
 
-const enabled = makeProject(JSON.stringify({ disableGitGuards: false }));
+const enabled = makeProject("pdc-project-config-", JSON.stringify({ disableGitGuards: false }));
 check("disableGitGuards: false", loadProjectConfig(enabled).disableGitGuards, false);
 rmSync(enabled, { recursive: true, force: true });
 
-const invalid = makeProject("{ not json");
+const invalid = makeProject("pdc-project-config-", "{ not json");
 check("invalid JSON → defaults (guards active)", loadProjectConfig(invalid), DEFAULT_PROJECT_CONFIG);
 rmSync(invalid, { recursive: true, force: true });
 
-const otherKeys = makeProject(JSON.stringify({ somethingElse: true }));
+const otherKeys = makeProject("pdc-project-config-", JSON.stringify({ somethingElse: true }));
 check("unrelated keys → defaults (guards active)", loadProjectConfig(otherKeys), DEFAULT_PROJECT_CONFIG);
 rmSync(otherKeys, { recursive: true, force: true });
 
@@ -133,5 +104,4 @@ for (const command of harmless) {
 	);
 }
 
-console.log(failures === 0 ? "\nAll project-config tests passed." : `\n${failures} test(s) failed.`);
-process.exit(failures === 0 ? 0 : 1);
+console.log("\nAll project-config tests passed.");

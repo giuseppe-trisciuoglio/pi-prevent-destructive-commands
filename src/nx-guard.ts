@@ -1,6 +1,7 @@
 import { lstat } from "node:fs/promises";
 import { basename, dirname, isAbsolute, normalize, relative, resolve } from "node:path";
 import { tokenize } from "./tokenizer";
+import { extractPatchPaths, pathsWrittenByTool as sharedPathsWrittenByTool } from "./patch-paths";
 
 const NX_WORKSPACE_FILE = "nx.json";
 const PROTECTED_FILE_NAMES: ReadonlySet<string> = new Set([
@@ -89,42 +90,19 @@ async function firstExistingNxConfigurationPath(
 	return undefined;
 }
 
+const APPLY_PATCH_PATH = /^\*\*\* (?:Add|Delete|Update) File: (.+)$/gm;
+const MOVE_PATH = /^\*\*\* Move to: (.+)$/gm;
+const DIFF_PATH = /^(?:---|\+\+\+)\s+(?:[ab]\/)?([^\t\n]+)$/gm;
+
 function patchPaths(patch: string): string[] {
-	const paths: string[] = [];
-	const applyPatchPath = /^\*\*\* (?:Add|Delete|Update) File: (.+)$/gm;
-	const movePath = /^\*\*\* Move to: (.+)$/gm;
-	const diffPath = /^(?:---|\+\+\+)\s+(?:[ab]\/)?([^\t\n]+)$/gm;
-
-	for (const expression of [applyPatchPath, movePath, diffPath]) {
-		let match: RegExpExecArray | null;
-		while ((match = expression.exec(patch)) !== null) {
-			if (match[1] !== "/dev/null") paths.push(match[1]);
-		}
-	}
-
-	return paths;
+	return extractPatchPaths(patch, [APPLY_PATCH_PATH, MOVE_PATH, DIFF_PATH]);
 }
 
 function pathsWrittenByTool(toolName: string, input: Record<string, unknown>): string[] {
-	if (toolName === "write" || toolName === "edit") {
-		return typeof input.path === "string" ? [input.path] : [];
-	}
-
-	if (toolName.endsWith("apply_patch")) {
-		return [input.input, input.patch]
-			.filter((value): value is string => typeof value === "string")
-			.flatMap(patchPaths);
-	}
-
-	if (toolName.endsWith("rename_refactoring")) {
-		return typeof input.pathInProject === "string" ? [input.pathInProject] : [];
-	}
-
 	if (toolName.endsWith("apply_quick_fix")) {
 		return typeof input.filePath === "string" ? [input.filePath] : [];
 	}
-
-	return [];
+	return sharedPathsWrittenByTool(toolName, input, patchPaths);
 }
 
 function splitCommand(tokens: readonly string[]): string[][] {
