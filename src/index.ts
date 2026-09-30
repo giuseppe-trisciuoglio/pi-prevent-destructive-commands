@@ -18,39 +18,18 @@ import {
 	loadProjectConfig,
 } from "./project-config";
 import { tokenize } from "./tokenizer";
+import { extractPatchPaths, pathsWrittenByTool as sharedPathsWrittenByTool } from "./patch-paths";
 import { registerGitGuardsCommand } from "./git-guards-command";
 
+const DIFF_PATH = /^(?:---|\+\+\+)\s+(?:[ab]\/)?([^\t\n]+)$/gm;
+const APPLY_PATCH_PATH = /^\*\*\* (?:Add|Delete|Update|Move to) File: (.+)$/gm;
+
 function pathsFromPatch(patch: string): string[] {
-	const paths: string[] = [];
-	const diffPath = /^(?:---|\+\+\+)\s+(?:[ab]\/)?([^\t\n]+)$/gm;
-	const applyPatchPath = /^\*\*\* (?:Add|Delete|Update|Move to) File: (.+)$/gm;
-
-	for (const expression of [diffPath, applyPatchPath]) {
-		let match: RegExpExecArray | null;
-		while ((match = expression.exec(patch)) !== null) {
-			if (match[1] !== "/dev/null") paths.push(match[1]);
-		}
-	}
-
-	return paths;
+	return extractPatchPaths(patch, [DIFF_PATH, APPLY_PATCH_PATH]);
 }
 
-function pathsWrittenByTool(toolName: string, input: Record<string, unknown>): string[] {
-	if (toolName === "write" || toolName === "edit") {
-		return typeof input.path === "string" ? [input.path] : [];
-	}
-
-	if (toolName.endsWith("apply_patch")) {
-		return [input.input, input.patch]
-			.filter((value): value is string => typeof value === "string")
-			.flatMap(pathsFromPatch);
-	}
-
-	if (toolName.endsWith("rename_refactoring")) {
-		return typeof input.pathInProject === "string" ? [input.pathInProject] : [];
-	}
-
-	return [];
+function pathsWritten(toolName: string, input: Record<string, unknown>): string[] {
+	return sharedPathsWrittenByTool(toolName, input, pathsFromPatch);
 }
 
 function commandReferencesMigrationPath(command: string, cwd: string, migrationDirectories: readonly string[]): boolean {
@@ -85,7 +64,7 @@ export default function (pi: ExtensionAPI) {
 			}
 		} else {
 			const input = event.input as Record<string, unknown>;
-			const touchedConfig = pathsWrittenByTool(event.toolName, input).some(
+			const touchedConfig = pathsWritten(event.toolName, input).some(
 				(path) => path.replaceAll("\\", "/").replace(/^\.\//, "") === PROJECT_CONFIG_RELATIVE_PATH,
 			);
 			if (touchedConfig) {
@@ -116,7 +95,7 @@ export default function (pi: ExtensionAPI) {
 				}
 			} else {
 				const input = event.input as Record<string, unknown>;
-				const protectedPath = pathsWrittenByTool(event.toolName, input).find((path) =>
+				const protectedPath = pathsWritten(event.toolName, input).find((path) =>
 					isDrizzleMigrationPath(path, ctx.cwd, migrationDirectories),
 				);
 				if (protectedPath) {

@@ -7,16 +7,11 @@
 
 import { tokenize } from "../src/tokenizer";
 import { checkTokens } from "../src/checker";
+import { runCheckCases, type CheckCase } from "./helpers";
 
 const CWD = "/home/user/projects/demo";
 
-interface Case {
-	command: string;
-	expectBlocked: boolean;
-	note?: string;
-}
-
-const cases: Case[] = [
+const cases: CheckCase[] = [
 	// ─── Destructive Git ──────────────────────────────────────────────────────
 	{ command: "git reset --hard", expectBlocked: true },
 	{ command: "git reset --hard HEAD~3", expectBlocked: true },
@@ -155,27 +150,4 @@ const cases: Case[] = [
 	{ command: "mkdir -p dist/build", expectBlocked: false },
 ];
 
-let passed = 0;
-let failed = 0;
-
-for (const c of cases) {
-	const tokens = tokenize(c.command);
-	const result = checkTokens(tokens, CWD);
-	const blocked = result.dangerous;
-	const ok = blocked === c.expectBlocked;
-	const status = ok ? "PASS" : "FAIL";
-	if (ok) passed++;
-	else failed++;
-	const tag = c.expectBlocked ? "block " : "allow";
-	const note = c.note ? `  (${c.note})` : "";
-	const reason = blocked && !ok ? `  -> ${result.reason}` : "";
-	console.log(
-		`${status}  [${tag}]  ${c.command}${note}${reason}`,
-	);
-}
-
-console.log("");
-console.log(`Result: ${passed} passed, ${failed} failed out of ${cases.length} cases.`);
-if (failed > 0) {
-	process.exit(1);
-}
+runCheckCases(cases, (command) => checkTokens(tokenize(command), CWD));
