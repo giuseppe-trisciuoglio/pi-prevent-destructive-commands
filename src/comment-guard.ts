@@ -17,6 +17,7 @@
 import { readFile } from "node:fs/promises";
 import { basename, extname, resolve } from "node:path";
 import { extractHeredocs } from "./heredoc";
+import { splitTokensBySeparators } from "./token-segments";
 import { tokenize } from "./tokenizer";
 
 // =============================================================================
@@ -450,26 +451,8 @@ function violationInAddedText(
 
 // ─── Bash write vectors ──────────────────────────────────────────────────────
 
-const COMMAND_SEPARATORS: ReadonlySet<string> = new Set(["|", ";", "&&", "||", "&", "(", ")"]);
 const WRITE_REDIRECTS: ReadonlySet<string> = new Set([">", ">>"]);
 const STDOUT_ECHO_COMMANDS: ReadonlySet<string> = new Set(["echo", "printf"]);
-
-function splitIntoSegments(tokens: readonly string[]): string[][] {
-	const segments: string[][] = [];
-	let segment: string[] = [];
-
-	for (const token of tokens) {
-		if (COMMAND_SEPARATORS.has(token)) {
-			if (segment.length > 0) segments.push(segment);
-			segment = [];
-			continue;
-		}
-		segment.push(token);
-	}
-
-	if (segment.length > 0) segments.push(segment);
-	return segments;
-}
 
 function isLikelyFileDestination(token: string): boolean {
 	// File-descriptor duplication (`>&2`) and option-like words are not paths.
@@ -525,7 +508,7 @@ async function violationInBashCommand(command: string, cwd: string): Promise<Com
 	const commandText = extraction?.text ?? command;
 	const bodies = extraction?.bodies ?? [];
 
-	const segments = splitIntoSegments(tokenize(commandText));
+	const segments = splitTokensBySeparators(tokenize(commandText));
 
 	for (const segment of segments) {
 		const destinations = bashWriteDestinations(segment);

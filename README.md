@@ -149,8 +149,11 @@ prevent-destructive-commands/
 │   ├── migration-guard.ts
 │   ├── nx-guard.ts       # Protects existing Nx package and TypeScript configuration files
 │   ├── comment-guard.ts  # Blocks new comments written into source files
+│   ├── patch-paths.ts    # Shared patch/file-path extraction from tool inputs
+│   ├── token-segments.ts # Shared command-segment splitting for bash-level guards
 │   └── rules/            # Per-category destructive-command handlers
 │       ├── types.ts          # Shared CheckResult type + helpers
+│       ├── args.ts           # Token-scanning helpers (positional args, subcommand matching)
 │       ├── path-utils.ts      # cwd-relative path resolution
 │       ├── git.ts             # git reset --hard, push --force, ...
 │       ├── docker.ts          # docker rm, system prune, ...
@@ -159,6 +162,7 @@ prevent-destructive-commands/
 │       └── path-sensitive.ts  # rm/rmdir/... outside-cwd detection
 ├── test/
 │   ├── smoke-test.ts        # Standalone test suite (79+ cases)
+│   ├── helpers.ts           # Shared test utilities (check, makeProject, runCheckCases, ...)
 │   ├── migration-guard-test.ts
 │   ├── nx-guard-test.ts     # Verifies Nx configuration protection and allowed creation
 │   ├── comment-guard-test.ts # Verifies new-comment blocking across write, edit, patch, bash

@@ -10,6 +10,7 @@ import {
 	isPotentialMigrationMutation,
 } from "./migration-guard";
 import { findNxConfigurationMutation, NX_CONFIG_BLOCK_REASON } from "./nx-guard";
+import { extractPatchPaths, pathsWrittenByTool } from "./patch-paths";
 import {
 	CONFIG_MUTATING_COMMAND,
 	DEFAULT_PROJECT_CONFIG,
@@ -22,36 +23,16 @@ import { tokenize } from "./tokenizer";
 import { registerGitGuardsCommand } from "./git-guards-command";
 
 function pathsFromPatch(patch: string): string[] {
-	const paths: string[] = [];
-	const diffPath = /^(?:---|\+\+\+)\s+(?:[ab]\/)?([^\t\n]+)$/gm;
-	const applyPatchPath = /^\*\*\* (?:Add|Delete|Update|Move to) File: (.+)$/gm;
-
-	for (const expression of [diffPath, applyPatchPath]) {
-		let match: RegExpExecArray | null;
-		while ((match = expression.exec(patch)) !== null) {
-			if (match[1] !== "/dev/null") paths.push(match[1]);
-		}
-	}
-
-	return paths;
+	return extractPatchPaths(patch, [
+		/^(?:---|\+\+\+)\s+(?:[ab]\/)?([^\t\n]+)$/gm,
+		/^\*\*\* (?:Add|Delete|Update|Move to) File: (.+)$/gm,
+	]);
 }
 
-function pathsWrittenByTool(toolName: string, input: Record<string, unknown>): string[] {
-	if (toolName === "write" || toolName === "edit") {
-		return typeof input.path === "string" ? [input.path] : [];
-	}
-
-	if (toolName.endsWith("apply_patch")) {
-		return [input.input, input.patch]
-			.filter((value): value is string => typeof value === "string")
-			.flatMap(pathsFromPatch);
-	}
-
-	if (toolName.endsWith("rename_refactoring")) {
-		return typeof input.pathInProject === "string" ? [input.pathInProject] : [];
-	}
-
-	return [];
+function pathsWrittenByToolInput(toolName: string, input: Record<string, unknown>): string[] {
+	return pathsWrittenByTool(toolName, input, pathsFromPatch, [
+		{ suffix: "rename_refactoring", read: (i) => (typeof i.pathInProject === "string" ? i.pathInProject : undefined) },
+	]);
 }
 
 function commandReferencesMigrationPath(command: string, cwd: string, migrationDirectories: readonly string[]): boolean {
@@ -86,7 +67,7 @@ export default function (pi: ExtensionAPI) {
 			}
 		} else {
 			const input = event.input as Record<string, unknown>;
-			const touchedConfig = pathsWrittenByTool(event.toolName, input).some(
+			const touchedConfig = pathsWrittenByToolInput(event.toolName, input).some(
 				(path) => path.replaceAll("\\", "/").replace(/^\.\//, "") === PROJECT_CONFIG_RELATIVE_PATH,
 			);
 			if (touchedConfig) {
@@ -132,7 +113,7 @@ export default function (pi: ExtensionAPI) {
 				}
 			} else {
 				const input = event.input as Record<string, unknown>;
-				const protectedPath = pathsWrittenByTool(event.toolName, input).find((path) =>
+				const protectedPath = pathsWrittenByToolInput(event.toolName, input).find((path) =>
 					isDrizzleMigrationPath(path, ctx.cwd, migrationDirectories),
 				);
 				if (protectedPath) {

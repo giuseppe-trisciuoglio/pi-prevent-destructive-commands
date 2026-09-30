@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
 	extractComments,
@@ -8,6 +7,7 @@ import {
 	sourceCommentBlockReason,
 } from "../src/comment-guard";
 import { loadProjectConfig, resetProjectConfigCache } from "../src/project-config";
+import { runIsolatedTest } from "./helpers";
 
 async function expectBlocked(
 	toolName: string,
@@ -30,10 +30,9 @@ async function expectAllowed(
 	assert.equal(violation, undefined, message);
 }
 
-async function main(): Promise<void> {
-	const root = mkdtempSync(join(tmpdir(), "comment-guard-"));
-
-	try {
+runIsolatedTest(
+	"New comments in source files are blocked across write, edit, patch, and bash tools",
+	async (root) => {
 		// ─── Comment extraction ─────────────────────────────────────────────
 
 		const javaComments = extractComments(
@@ -368,14 +367,5 @@ async function main(): Promise<void> {
 		assert.equal(loadProjectConfig(root).disableGitGuards, false);
 		rmSync(join(root, ".pi"), { recursive: true, force: true });
 		resetProjectConfigCache();
-
-		console.log("PASS  New comments in source files are blocked across write, edit, patch, and bash tools");
-	} finally {
-		rmSync(root, { recursive: true, force: true });
-	}
-}
-
-main().catch((error) => {
-	console.error(error);
-	process.exit(1);
-});
+	},
+);

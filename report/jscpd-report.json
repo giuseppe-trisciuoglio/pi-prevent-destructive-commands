@@ -1,0 +1,337 @@
+{
+  "duplicates": [
+    {
+      "firstFile": {
+        "end": 197,
+        "endLoc": {
+          "column": 9,
+          "line": 197,
+          "position": 6291
+        },
+        "name": "checker.ts",
+        "start": 189,
+        "startLoc": {
+          "column": 3,
+          "line": 189,
+          "position": 6098
+        }
+      },
+      "format": "typescript",
+      "fragment": "\t\t\tlet j = i + 1;\n\t\t\twhile (j < tokens.length) {\n\t\t\t\tconst arg = tokens[j];\n\t\t\t\tif (!arg || SHELL_OPERATORS.has(arg)) break;\n\t\t\t\tif (arg.startsWith(\"-\")) {\n\t\t\t\t\tj++;\n\t\t\t\t\tcontinue;\n\t\t\t\t}\n\t\t\t\tconst r = checkCommand(arg, currentCwd ?? cwd, depth + 1, boundaryCwd, options);",
+      "isNew": false,
+      "kind": "exact",
+      "lines": 9,
+      "secondFile": {
+        "end": 16,
+        "endLoc": {
+          "column": 7,
+          "line": 16,
+          "position": 557
+        },
+        "name": "rules/file-reading.ts",
+        "start": 8,
+        "startLoc": {
+          "column": 1,
+          "line": 8,
+          "position": 380
+        }
+      },
+      "tokens": 55
+    },
+    {
+      "firstFile": {
+        "end": 474,
+        "endLoc": {
+          "column": 8,
+          "line": 474,
+          "position": 13534
+        },
+        "name": "comment-guard.ts",
+        "start": 457,
+        "startLoc": {
+          "column": 26,
+          "line": 457,
+          "position": 13168
+        }
+      },
+      "format": "typescript",
+      "fragment": "function splitIntoSegments(tokens: readonly string[]): string[][] {\n\tconst segments: string[][] = [];\n\tlet segment: string[] = [];\n\n\tfor (const token of tokens) {\n\t\tif (COMMAND_SEPARATORS.has(token)) {\n\t\t\tif (segment.length > 0) segments.push(segment);\n\t\t\tsegment = [];\n\t\t\tcontinue;\n\t\t}\n\t\tsegment.push(token);\n\t}\n\n\tif (segment.length > 0) segments.push(segment);\n\treturn segments;\n}\n\nfunction isLikelyFileDestination(token: string): boolean {",
+      "isNew": false,
+      "kind": "exact",
+      "lines": 18,
+      "secondFile": {
+        "end": 147,
+        "endLoc": {
+          "column": 8,
+          "line": 147,
+          "position": 4219
+        },
+        "name": "nx-guard.ts",
+        "start": 130,
+        "startLoc": {
+          "column": 21,
+          "line": 130,
+          "position": 3853
+        }
+      },
+      "tokens": 106
+    },
+    {
+      "firstFile": {
+        "end": 47,
+        "endLoc": {
+          "column": 12,
+          "line": 47,
+          "position": 1672
+        },
+        "name": "index.ts",
+        "start": 29,
+        "startLoc": {
+          "column": 51,
+          "line": 29,
+          "position": 1133
+        }
+      },
+      "format": "typescript",
+      "fragment": "\tfor (const expression of [diffPath, applyPatchPath]) {\n\t\tlet match: RegExpExecArray | null;\n\t\twhile ((match = expression.exec(patch)) !== null) {\n\t\t\tif (match[1] !== \"/dev/null\") paths.push(match[1]);\n\t\t}\n\t}\n\n\treturn paths;\n}\n\nfunction pathsWrittenByTool(toolName: string, input: Record<string, unknown>): string[] {\n\tif (toolName === \"write\" || toolName === \"edit\") {\n\t\treturn typeof input.path === \"string\" ? [input.path] : [];\n\t}\n\n\tif (toolName.endsWith(\"apply_patch\")) {\n\t\treturn [input.input, input.patch]\n\t\t\t.filter((value): value is string => typeof value === \"string\")\n\t\t\t.flatMap(pathsFromPatch);",
+      "isNew": false,
+      "kind": "exact",
+      "lines": 19,
+      "secondFile": {
+        "end": 116,
+        "endLoc": {
+          "column": 12,
+          "line": 116,
+          "position": 3551
+        },
+        "name": "nx-guard.ts",
+        "start": 98,
+        "startLoc": {
+          "column": 61,
+          "line": 98,
+          "position": 3012
+        }
+      },
+      "tokens": 140
+    },
+    {
+      "firstFile": {
+        "end": 16,
+        "endLoc": {
+          "column": 6,
+          "line": 16,
+          "position": 614
+        },
+        "name": "rules/aws.ts",
+        "start": 10,
+        "startLoc": {
+          "column": 75,
+          "line": 10,
+          "position": 464
+        }
+      },
+      "format": "typescript",
+      "fragment": "\twhile (j < tokens.length && !tokens[j].startsWith(\"-\") && parts.length < 3) {\n\t\tparts.push(tokens[j]);\n\t\tj++;\n\t}\n\tfor (let length = parts.length; length > 0; length--) {\n\t\tconst sub = parts.slice(0, length).join(\" \");\n\t\tif (AWS_DESTRUCTIVE_SUBCOMMANDS.has(sub)) {",
+      "isNew": false,
+      "kind": "exact",
+      "lines": 7,
+      "secondFile": {
+        "end": 39,
+        "endLoc": {
+          "column": 6,
+          "line": 39,
+          "position": 1621
+        },
+        "name": "rules/gh.ts",
+        "start": 33,
+        "startLoc": {
+          "column": 75,
+          "line": 33,
+          "position": 1471
+        }
+      },
+      "tokens": 52
+    },
+    {
+      "firstFile": {
+        "end": 381,
+        "endLoc": {
+          "column": 3,
+          "line": 381,
+          "position": 11420
+        },
+        "name": "comment-guard-test.ts",
+        "start": 372,
+        "startLoc": {
+          "column": 104,
+          "line": 372,
+          "position": 11278
+        }
+      },
+      "format": "typescript",
+      "fragment": "\t\tconsole.log(\"PASS  New comments in source files are blocked across write, edit, patch, and bash tools\");\n\t} finally {\n\t\trmSync(root, { recursive: true, force: true });\n\t}\n}\n\nmain().catch((error) => {\n\tconsole.error(error);\n\tprocess.exit(1);\n});",
+      "isNew": false,
+      "kind": "exact",
+      "lines": 10,
+      "secondFile": {
+        "end": 37,
+        "endLoc": {
+          "column": 3,
+          "line": 37,
+          "position": 1502
+        },
+        "name": "migration-guard-test.ts",
+        "start": 28,
+        "startLoc": {
+          "column": 113,
+          "line": 28,
+          "position": 1360
+        }
+      },
+      "tokens": 50
+    },
+    {
+      "firstFile": {
+        "end": 38,
+        "endLoc": {
+          "column": 39,
+          "line": 38,
+          "position": 1188
+        },
+        "name": "git-guards-command-test.ts",
+        "start": 19,
+        "startLoc": {
+          "column": 29,
+          "line": 19,
+          "position": 650
+        }
+      },
+      "format": "typescript",
+      "fragment": "\tPROJECT_CONFIG_RELATIVE_PATH,\n\tloadProjectConfig,\n\tresetProjectConfigCache,\n} from \"../src/project-config\";\nimport { tokenize } from \"../src/tokenizer\";\n\nlet failures = 0;\n\nfunction check(name: string, actual: unknown, expected: unknown) {\n\tconst ok = JSON.stringify(actual) === JSON.stringify(expected);\n\tif (!ok) {\n\t\tfailures++;\n\t\tconsole.error(`✗ ${name}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);\n\t} else {\n\t\tconsole.log(`✓ ${name}`);\n\t}\n}\n\nfunction makeProject(content?: string): string {\n\tconst dir = mkdtempSync(join(tmpdir(), \"pdc-git-guards-cmd-\"));",
+      "isNew": false,
+      "kind": "exact",
+      "lines": 20,
+      "secondFile": {
+        "end": 34,
+        "endLoc": {
+          "column": 39,
+          "line": 34,
+          "position": 1035
+        },
+        "name": "project-config-test.ts",
+        "start": 15,
+        "startLoc": {
+          "column": 31,
+          "line": 15,
+          "position": 497
+        }
+      },
+      "tokens": 122
+    },
+    {
+      "firstFile": {
+        "end": 49,
+        "endLoc": {
+          "column": 1,
+          "line": 49,
+          "position": 1604
+        },
+        "name": "git-guards-command-test.ts",
+        "start": 38,
+        "startLoc": {
+          "column": 61,
+          "line": 38,
+          "position": 1210
+        }
+      },
+      "format": "typescript",
+      "fragment": "\tconst dir = mkdtempSync(join(tmpdir(), \"pdc-git-guards-cmd-\"));\n\tif (content !== undefined) {\n\t\tmkdirSync(join(dir, \".pi\"), { recursive: true });\n\t\twriteFileSync(join(dir, ...PROJECT_CONFIG_RELATIVE_PATH.split(\"/\")), content);\n\t}\n\tresetProjectConfigCache();\n\treturn dir;\n}\n\nfunction isBlocked(command: string, cwd: string, gitGuardsEnabled: boolean): boolean {\n\treturn checkTokens(tokenize(command), cwd, 0, false, cwd, { gitGuardsEnabled }).dangerous;\n}",
+      "isNew": false,
+      "kind": "exact",
+      "lines": 12,
+      "secondFile": {
+        "end": 45,
+        "endLoc": {
+          "column": 1,
+          "line": 45,
+          "position": 1451
+        },
+        "name": "project-config-test.ts",
+        "start": 34,
+        "startLoc": {
+          "column": 61,
+          "line": 34,
+          "position": 1057
+        }
+      },
+      "tokens": 95
+    },
+    {
+      "firstFile": {
+        "end": 168,
+        "endLoc": {
+          "column": 62,
+          "line": 168,
+          "position": 4037
+        },
+        "name": "heredoc-test.ts",
+        "start": 160,
+        "startLoc": {
+          "column": 38,
+          "line": 160,
+          "position": 3722
+        }
+      },
+      "format": "typescript",
+      "fragment": "\tconst result = checkCommand(c.command, CWD);\n\tconst blocked = result.dangerous;\n\tconst ok = blocked === c.expectBlocked;\n\tconst status = ok ? \"PASS\" : \"FAIL\";\n\tif (ok) passed++;\n\telse failed++;\n\tconst tag = c.expectBlocked ? \"block \" : \"allow\";\n\tconst note = c.note ? `  (${c.note})` : \"\";\n\tconst reason = blocked && !ok ? `  -> ${result.reason}` : \"\";",
+      "isNew": false,
+      "kind": "exact",
+      "lines": 9,
+      "secondFile": {
+        "end": 171,
+        "endLoc": {
+          "column": 62,
+          "line": 171,
+          "position": 9176
+        },
+        "name": "smoke-test.ts",
+        "start": 163,
+        "startLoc": {
+          "column": 34,
+          "line": 163,
+          "position": 8861
+        }
+      },
+      "tokens": 82
+    }
+  ],
+  "statistics": {
+    "detectionDate": "2026-09-30T10:55:04.029Z",
+    "formats": {
+      "typescript": {
+        "clones": 8,
+        "duplicatedLines": 104,
+        "duplicatedTokens": 702,
+        "lines": 4375,
+        "newClones": 0,
+        "newDuplicatedLines": 0,
+        "percentage": 2.3771428571428572,
+        "percentageTokens": 3.23785803237858,
+        "sources": 28,
+        "tokens": 21681
+      }
+    },
+    "total": {
+      "clones": 8,
+      "duplicatedLines": 104,
+      "duplicatedTokens": 702,
+      "lines": 4375,
+      "newClones": 0,
+      "newDuplicatedLines": 0,
+      "percentage": 2.3771428571428572,
+      "percentageTokens": 3.23785803237858,
+      "sources": 28,
+      "tokens": 21681
+    }
+  }
+}
