@@ -31,6 +31,7 @@ All rules are defined in [`src/config.ts`](src/config.ts) and can be customized.
 |----------|----------|
 | **Destructive Git** | `git reset --hard`, `git clean`, `git push --force` / `-f` / `--delete`, `git branch -D`, `git tag -d`, `git checkout -f`, `git rebase`, `git filter-branch`, `git filter-repo`, `git reflog expire`, `git update-ref -d` |
 | **Git add/commit/push** | `git add`, `git commit`, `git push` *(see `ENABLE_GIT_ADD_COMMIT_BLOCK` flag and the per-project opt-out below; force/delete push variants are always blocked)* |
+| **Interactive git commit** | `git commit` without a message option (`-m`/`--message`, `-F`/`--file`, `-C`/`--reuse-message`, `-c`/`--reedit-message`, `--no-edit`, `--fixup`, or combined short forms like `-am`) — it would open the editor and hang the session. Always blocked, even when the project opts out of the git add/commit/push guards. |
 | **rm / path-sensitive** | `rm`, `rmdir`, `shred`, `unlink` targeting paths **outside** the working directory (e.g., `/etc`, `~`, `..`). Targets inside cwd are allowed. |
 | **find outside cwd** | `find` whose search root is **outside** the working directory (e.g., `find /etc`, `find ~`, `find ..`). Search roots inside cwd are allowed; `-exec` payloads are analyzed recursively as before. |
 | **Destructive Docker** | `docker rm` / `rmi`, `docker container/image/volume/network rm`, `docker * prune`, `docker compose down -v`, `docker compose rm`, `docker context rm`, `docker swarm leave --force` |
