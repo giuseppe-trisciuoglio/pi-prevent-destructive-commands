@@ -70,6 +70,19 @@ const empty = makeProject();
 
 	// End-to-end guard behavior with the new state.
 	check("guards off → git commit allowed", isBlocked("git commit -m x", empty, false), false);
+
+	// Interactive-commit hang prevention: blocked even with guards off.
+	check("guards off → bare git commit still blocked", isBlocked("git commit", empty, false), true);
+	check("guards off → git commit -a still blocked", isBlocked("git commit -a", empty, false), true);
+	check("guards off → git commit --amend still blocked", isBlocked("git commit --amend", empty, false), true);
+	check("guards off → git commit --no-verify still blocked", isBlocked("git commit --no-verify", empty, false), true);
+	check("guards off → git commit -am x allowed", isBlocked("git commit -am x", empty, false), false);
+	check("guards off → git commit -F msg.txt allowed", isBlocked("git commit -F msg.txt", empty, false), false);
+	check("guards off → git commit --amend --no-edit allowed", isBlocked("git commit --amend --no-edit", empty, false), false);
+	check("guards off → git commit --message=x allowed", isBlocked("git commit --message=x", empty, false), false);
+	check("guards on → bare git commit blocked", isBlocked("git commit", empty, true), true);
+	check("guards on → git commit --amend blocked", isBlocked("git commit --amend", empty, true), true);
+
 	check("guards off → git push allowed", isBlocked("git push", empty, false), false);
 	check("guards off → git push --force still blocked", isBlocked("git push --force", empty, false), true);
 	check("guards off → git reset --hard still blocked", isBlocked("git reset --hard", empty, false), true);

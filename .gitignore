@@ -40,3 +40,4 @@ Thumbs.db
 coverage/
 .pi/remote-pi
 report/
+.pi-worktrees/
