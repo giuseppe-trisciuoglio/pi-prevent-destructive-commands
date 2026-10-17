@@ -18,6 +18,7 @@ A faithful port of Claude's [`prevent-destructive-commands.py`](https://github.c
 - **Works in all modes** — Protection is active even in non-interactive sessions (`-p`, JSON, RPC).
 - **Recursive analysis** — Traverses command wrappers, shell invocations, pipelines, and nested commands to catch obfuscated attacks.
 - **Nx configuration guard** — In Nx workspaces, existing `package.json` and TypeScript configuration files are immutable to the agent; missing ones can still be created.
+- **Source comment guard** — The agent cannot introduce new comments into source files (Java, TypeScript, Dart, Python, SQL, HTML, and more) through writing tools or bash write vectors; existing comments may be carried over untouched and tooling directives (`@ts-ignore`, `eslint-disable`, …) stay allowed.
 - **Configurable** — Tune protection levels via simple flags in `src/config.ts`.
 - **Zero dependencies** — Lightweight, fast, and self-contained.
 - **79+ test cases** — Comprehensive smoke test suite validates all blocking rules.
@@ -37,6 +38,7 @@ All rules are defined in [`src/config.ts`](src/config.ts) and can be customized.
 | **Destructive AWS CLI** | `aws s3 rm`, `aws ec2 terminate-instances`, `aws rds delete-db-instance`, `aws cloudformation delete-stack`, and 50+ more subcommands (full list in `src/config.ts`) |
 | **Sensitive file reads** | `cat`, `grep`, etc. on `.env`, SSH keys, `.pem` files — **disabled by default** via `ENABLE_SENSITIVE_FILE_CHECK` *(see Configuration)* |
 | **Existing Nx configuration** | `package.json`, `tsconfig.json`, `tsconfig.base.json`, `tsconfig.lib.json`, and `tsconfig.spec.json` anywhere below a workspace containing `nx.json`. Creating a missing file is allowed; changing or deleting an existing file is blocked. |
+| **New comments in source files** | Any tool call that introduces a **new** comment into a source file: `write`/`edit`/`apply_patch` touching Java, TypeScript/JavaScript, Dart, Go, Rust, C/C++, C#, Swift, Kotlin, Scala, PHP, CSS/SCSS, Python, Ruby, shell, YAML, TOML, Terraform, GraphQL, SQL, Lua, Haskell, Elm, HTML/XML/SVG/Markdown files, plus bash write vectors (`cat > a.ts <<EOF`, `tee b.py <<EOF`, `echo "// x" >> c.ts`). Comments already in the file may be carried over; shebang lines, tooling directives (`@ts-ignore`, `eslint-disable`, `biome-ignore`, `noqa`, …) and purely decorative lines are exempt *(see the per-project opt-out below)* |
 
 ### Recursive Analysis
 
@@ -104,13 +106,19 @@ pi /reload
 
 ### Per-Project Opt-Out
 
-Create `.pi/prevent-destructive-commands.json` in the project root to disable the `git add` / `git commit` / `git push` guards **for that project only**:
+Create `.pi/prevent-destructive-commands.json` in the project root to tune the guards **for that project only**:
 
 ```json
 {
-	"disableGitGuards": true
+	"disableGitGuards": true,
+	"disableCommentGuard": true
 }
 ```
+
+| Flag | Default | Effect |
+|------|---------|--------|
+| `disableGitGuards` | `false` | Disables the `git add` / `git commit` / `git push` guards. |
+| `disableCommentGuard` | `false` | Disables the source comment guard, allowing the agent to write comments into source files again. |
 
 Or use the `/git-guards` slash command from the pi TUI:
 
@@ -140,8 +148,12 @@ prevent-destructive-commands/
 │   ├── checker.ts        # Recursive command walker (wrappers/shell/find/xargs)
 │   ├── migration-guard.ts
 │   ├── nx-guard.ts       # Protects existing Nx package and TypeScript configuration files
+│   ├── comment-guard.ts  # Blocks new comments written into source files
+│   ├── patch-paths.ts    # Shared patch/file-path extraction from tool inputs
+│   ├── token-segments.ts # Shared command-segment splitting for bash-level guards
 │   └── rules/            # Per-category destructive-command handlers
 │       ├── types.ts          # Shared CheckResult type + helpers
+│       ├── args.ts           # Token-scanning helpers (positional args, subcommand matching)
 │       ├── path-utils.ts      # cwd-relative path resolution
 │       ├── git.ts             # git reset --hard, push --force, ...
 │       ├── docker.ts          # docker rm, system prune, ...
@@ -150,8 +162,10 @@ prevent-destructive-commands/
 │       └── path-sensitive.ts  # rm/rmdir/... outside-cwd detection
 ├── test/
 │   ├── smoke-test.ts        # Standalone test suite (79+ cases)
+│   ├── helpers.ts           # Shared test utilities (check, makeProject, runCheckCases, ...)
 │   ├── migration-guard-test.ts
 │   ├── nx-guard-test.ts     # Verifies Nx configuration protection and allowed creation
+│   ├── comment-guard-test.ts # Verifies new-comment blocking across write, edit, patch, bash
 │   └── e2e-install-test.ts  # End-to-end: verifies real installation/discovery by pi
 ├── tsconfig.json     # TypeScript configuration
 ├── package.json      # Package metadata for pi marketplace
@@ -176,6 +190,8 @@ Standalone tests for the tokenizer/checker logic (no dependency on pi itself):
 npm run test:smoke
 npm run test:heredoc
 npm run test:nx-guard
+npm run test:comment-guard
+```
 
 # Or directly with tsx
 npx tsx test/smoke-test.ts
@@ -203,6 +219,7 @@ npx tsx test/e2e-install-test.ts
 The test suite covers:
 - All destructive Git operations
 - Existing Nx package and TypeScript configuration protection, including direct tool writes, patches, shell redirection, and package-manager dependency changes
+- Source comment blocking across `write`, `edit`, `apply_patch`, and bash write vectors (heredoc, `tee`, `echo`/`printf`), including string-literal false-positive checks and the per-project opt-out
 - Path-sensitive `rm` protection
 - Docker destructive commands
 - AWS CLI destructive subcommands
@@ -223,6 +240,7 @@ As with the original Claude plugin, the analysis is static and therefore cannot 
 | Limitation | Example | Explanation |
 |------------|---------|-------------|
 | **Unknown wrappers** | Custom destructive tools | The extension covers known patterns; unknown wrappers or custom destructive tools are not intercepted. |
+| **Comment guard scope** | `python -c`, `sed` insertion; `.vue`/`.svelte`/`.astro` files | The comment guard covers writing tools and the common bash write vectors (heredoc, `tee`, `echo`/`printf` arguments); other generators are not intercepted. Mixed-language single-file components are excluded to avoid false positives across template/script/style blocks. A bash rewrite of an existing file counts every comment in the heredoc body as new. |
 
 Two cases that used to be listed here are now handled:
 
@@ -233,13 +251,14 @@ Two cases that used to be listed here are now handled:
 
 ## How It Works
 
-When pi attempts to execute a bash command, this extension intercepts the `tool_call` event and:
+When pi attempts to execute a tool call, this extension intercepts the `tool_call` event and:
 
 1. **Extracts heredoc bodies** so prose fed through `cat > file <<'EOF'` is treated as data, keeping bodies under analysis only when an executor on the command line would run them.
 2. **Tokenizes** the command string using a shlex-like shell tokenizer that respects quotes and escapes.
 3. **Analyzes** the token stream recursively, traversing wrappers, shell invocations, and pipelines.
-4. **Blocks** if any destructive pattern is detected, returning a clear reason to the agent.
-5. **Allows** safe commands to pass through without modification.
+4. **Checks writing tool calls** against the file-content guards: immutable Nx configuration, and new comments introduced into source files (string-aware, per language family, with only-newly-introduced comments blocked).
+5. **Blocks** if any destructive pattern is detected, returning a clear reason to the agent.
+6. **Allows** safe commands to pass through without modification.
 
 The agent never receives an interactive prompt — the block is final and must be handled by finding a safe alternative.
 

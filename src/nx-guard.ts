@@ -1,5 +1,7 @@
 import { lstat } from "node:fs/promises";
 import { basename, dirname, isAbsolute, normalize, relative, resolve } from "node:path";
+import { extractPatchPaths, pathsWrittenByTool as extractPathsWrittenByTool } from "./patch-paths";
+import { splitTokensBySeparators } from "./token-segments";
 import { tokenize } from "./tokenizer";
 
 const NX_WORKSPACE_FILE = "nx.json";
@@ -10,7 +12,6 @@ const PROTECTED_FILE_NAMES: ReadonlySet<string> = new Set([
 	"tsconfig.lib.json",
 	"tsconfig.spec.json",
 ]);
-const COMMAND_SEPARATORS: ReadonlySet<string> = new Set(["|", ";", "&&", "||", "&", "(", ")"]);
 const REDIRECT_OPERATORS: ReadonlySet<string> = new Set([">", ">>", "2>", "2>>", "&>", "&>>"]);
 const ALL_PATH_MUTATING_COMMANDS: ReadonlySet<string> = new Set([
 	"rm",
@@ -90,58 +91,23 @@ async function firstExistingNxConfigurationPath(
 }
 
 function patchPaths(patch: string): string[] {
-	const paths: string[] = [];
-	const applyPatchPath = /^\*\*\* (?:Add|Delete|Update) File: (.+)$/gm;
-	const movePath = /^\*\*\* Move to: (.+)$/gm;
-	const diffPath = /^(?:---|\+\+\+)\s+(?:[ab]\/)?([^\t\n]+)$/gm;
-
-	for (const expression of [applyPatchPath, movePath, diffPath]) {
-		let match: RegExpExecArray | null;
-		while ((match = expression.exec(patch)) !== null) {
-			if (match[1] !== "/dev/null") paths.push(match[1]);
-		}
-	}
-
-	return paths;
+	return extractPatchPaths(patch, [
+		/^\*\*\* (?:Add|Delete|Update) File: (.+)$/gm,
+		/^\*\*\* Move to: (.+)$/gm,
+		/^(?:---|\+\+\+)\s+(?:[ab]\/)?([^\t\n]+)$/gm,
+	]);
 }
 
 function pathsWrittenByTool(toolName: string, input: Record<string, unknown>): string[] {
-	if (toolName === "write" || toolName === "edit") {
-		return typeof input.path === "string" ? [input.path] : [];
-	}
-
-	if (toolName.endsWith("apply_patch")) {
-		return [input.input, input.patch]
-			.filter((value): value is string => typeof value === "string")
-			.flatMap(patchPaths);
-	}
-
-	if (toolName.endsWith("rename_refactoring")) {
-		return typeof input.pathInProject === "string" ? [input.pathInProject] : [];
-	}
-
-	if (toolName.endsWith("apply_quick_fix")) {
-		return typeof input.filePath === "string" ? [input.filePath] : [];
-	}
-
-	return [];
-}
-
-function splitCommand(tokens: readonly string[]): string[][] {
-	const segments: string[][] = [];
-	let segment: string[] = [];
-
-	for (const token of tokens) {
-		if (COMMAND_SEPARATORS.has(token)) {
-			if (segment.length > 0) segments.push(segment);
-			segment = [];
-			continue;
-		}
-		segment.push(token);
-	}
-
-	if (segment.length > 0) segments.push(segment);
-	return segments;
+	return extractPathsWrittenByTool(
+		toolName,
+		input,
+		patchPaths,
+		[
+			{ suffix: "rename_refactoring", read: (i) => (typeof i.pathInProject === "string" ? i.pathInProject : undefined) },
+			{ suffix: "apply_quick_fix", read: (i) => (typeof i.filePath === "string" ? i.filePath : undefined) },
+		],
+	);
 }
 
 function positionalArguments(tokens: readonly string[], start: number): string[] {
@@ -222,11 +188,11 @@ function mutationPathsFromSegment(segment: readonly string[]): string[] {
 }
 
 function mutationPathsFromBashCommand(command: string): string[] {
-	return splitCommand(tokenize(command)).flatMap(mutationPathsFromSegment);
+	return splitTokensBySeparators(tokenize(command)).flatMap(mutationPathsFromSegment);
 }
 
 function mutatesPackageManifest(command: string): boolean {
-	for (const segment of splitCommand(tokenize(command))) {
+	for (const segment of splitTokensBySeparators(tokenize(command))) {
 		for (let i = 0; i < segment.length; i++) {
 			if (!PACKAGE_MANAGERS.has(segment[i])) continue;
 

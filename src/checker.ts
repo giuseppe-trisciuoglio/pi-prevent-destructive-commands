@@ -9,6 +9,7 @@
  */
 
 import { tokenize } from "./tokenizer";
+import { forEachPositionalArg } from "./rules/args";
 import {
 	DELEGATION_COMMANDS,
 	FILE_READING_COMMANDS,
@@ -186,18 +187,15 @@ export function checkTokens(
 
 		// Quoted-command wrappers: the first positional argument is a command
 		if (QUOTED_COMMAND_WRAPPERS.has(token)) {
-			let j = i + 1;
-			while (j < tokens.length) {
-				const arg = tokens[j];
-				if (!arg || SHELL_OPERATORS.has(arg)) break;
-				if (arg.startsWith("-")) {
-					j++;
-					continue;
-				}
+			let dangerous: CheckResult | undefined;
+			forEachPositionalArg(tokens, i, (arg) => {
 				const r = checkCommand(arg, currentCwd ?? cwd, depth + 1, boundaryCwd, options);
-				if (r.dangerous) return r;
-				break;
-			}
+				if (r.dangerous) {
+					dangerous = r;
+					return false;
+				}
+			});
+			if (dangerous) return dangerous;
 			i++;
 			continue;
 		}
