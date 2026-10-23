@@ -21,6 +21,7 @@ import {
 } from "./project-config";
 import { tokenize } from "./tokenizer";
 import { registerGitGuardsCommand } from "./git-guards-command";
+import { readOnlyBlockResult, registerReadOnlyCommand } from "./read-only-command";
 
 function pathsFromPatch(patch: string): string[] {
 	return extractPatchPaths(patch, [
@@ -52,8 +53,18 @@ function commandReferencesMigrationPath(command: string, cwd: string, migrationD
 
 export default function (pi: ExtensionAPI) {
 	registerGitGuardsCommand(pi);
+	registerReadOnlyCommand(pi);
 
 	pi.on("tool_call", async (event, ctx) => {
+		const projectConfig = ctx.cwd
+			? loadProjectConfig(ctx.cwd)
+			: DEFAULT_PROJECT_CONFIG;
+
+		const readOnlyBlock = readOnlyBlockResult(event.toolName, projectConfig);
+		if (readOnlyBlock) {
+			return readOnlyBlock;
+		}
+
 		// The per-project opt-out file is user-only: the agent must never create
 		// or edit it, neither through the writing tools nor through bash.
 		if (isToolCallEventType("bash", event)) {
@@ -83,10 +94,6 @@ export default function (pi: ExtensionAPI) {
 		if (nxConfigurationPath) {
 			return { block: true, reason: NX_CONFIG_BLOCK_REASON };
 		}
-
-		const projectConfig = ctx.cwd
-			? loadProjectConfig(ctx.cwd)
-			: DEFAULT_PROJECT_CONFIG;
 
 		if (!projectConfig.disableCommentGuard) {
 			const commentViolation = await findNewSourceComments(

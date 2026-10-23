@@ -18,11 +18,13 @@ export interface ProjectConfig {
 	disableGitGuards: boolean;
 	/** When true, the source comment guard is disabled. */
 	disableCommentGuard: boolean;
+	readOnly: boolean;
 }
 
 export const DEFAULT_PROJECT_CONFIG: ProjectConfig = {
 	disableGitGuards: false,
 	disableCommentGuard: false,
+	readOnly: false,
 };
 
 /** Absolute path of the project configuration file for a given cwd. */
@@ -60,9 +62,11 @@ export function loadProjectConfig(cwd: string): ProjectConfig {
 	try {
 		const raw: unknown = JSON.parse(readFileSync(path, "utf8"));
 		if (typeof raw === "object" && raw !== null) {
+			const fields = raw as Record<string, unknown>;
 			config = {
-				disableGitGuards: (raw as Record<string, unknown>).disableGitGuards === true,
-				disableCommentGuard: (raw as Record<string, unknown>).disableCommentGuard === true,
+				disableGitGuards: fields.disableGitGuards === true,
+				disableCommentGuard: fields.disableCommentGuard === true,
+				readOnly: fields.readOnly === true,
 			};
 		}
 	} catch {
