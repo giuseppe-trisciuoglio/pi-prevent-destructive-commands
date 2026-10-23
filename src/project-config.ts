@@ -8,8 +8,8 @@
  * user — the extension itself blocks the agent from writing to it.
  */
 
-import { readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 
 export const PROJECT_CONFIG_RELATIVE_PATH = ".pi/prevent-destructive-commands.json";
 
@@ -18,11 +18,13 @@ export interface ProjectConfig {
 	disableGitGuards: boolean;
 	/** When true, the source comment guard is disabled. */
 	disableCommentGuard: boolean;
+	readOnly: boolean;
 }
 
 export const DEFAULT_PROJECT_CONFIG: ProjectConfig = {
 	disableGitGuards: false,
 	disableCommentGuard: false,
+	readOnly: false,
 };
 
 /** Absolute path of the project configuration file for a given cwd. */
@@ -60,9 +62,11 @@ export function loadProjectConfig(cwd: string): ProjectConfig {
 	try {
 		const raw: unknown = JSON.parse(readFileSync(path, "utf8"));
 		if (typeof raw === "object" && raw !== null) {
+			const fields = raw as Record<string, unknown>;
 			config = {
-				disableGitGuards: (raw as Record<string, unknown>).disableGitGuards === true,
-				disableCommentGuard: (raw as Record<string, unknown>).disableCommentGuard === true,
+				disableGitGuards: fields.disableGitGuards === true,
+				disableCommentGuard: fields.disableCommentGuard === true,
+				readOnly: fields.readOnly === true,
 			};
 		}
 	} catch {
@@ -91,4 +95,64 @@ export function commandReferencesProjectConfig(command: string): boolean {
 /** Test hook: drops the mtime cache. */
 export function resetProjectConfigCache(): void {
 	cache.clear();
+}
+
+export interface ProjectConfigFileStatus {
+	fileExists: boolean;
+	fileValid: boolean;
+}
+
+export function projectConfigFileStatus(cwd: string): ProjectConfigFileStatus {
+	const path = projectConfigPath(cwd);
+
+	let fileExists = false;
+	try {
+		statSync(path);
+		fileExists = true;
+	} catch {
+	}
+
+	let fileValid = !fileExists;
+	if (fileExists) {
+		try {
+			const raw: unknown = JSON.parse(readFileSync(path, "utf8"));
+			fileValid = typeof raw === "object" && raw !== null && !Array.isArray(raw);
+		} catch {
+			fileValid = false;
+		}
+	}
+
+	return { fileExists, fileValid };
+}
+
+export function writeProjectConfigFlag(
+	cwd: string,
+	mutate: (config: Record<string, unknown>) => void,
+): boolean {
+	const path = projectConfigPath(cwd);
+
+	let previous: Record<string, unknown> = {};
+	let replacedInvalid = false;
+	try {
+		const raw: unknown = JSON.parse(readFileSync(path, "utf8"));
+		if (typeof raw === "object" && raw !== null && !Array.isArray(raw)) {
+			previous = raw as Record<string, unknown>;
+		} else {
+			replacedInvalid = true;
+		}
+	} catch {
+		try {
+			statSync(path);
+			replacedInvalid = true;
+		} catch {
+		}
+	}
+
+	mutate(previous);
+
+	mkdirSync(dirname(path), { recursive: true });
+	writeFileSync(path, `${JSON.stringify(previous, null, "\t")}\n`, "utf8");
+	resetProjectConfigCache();
+
+	return replacedInvalid;
 }

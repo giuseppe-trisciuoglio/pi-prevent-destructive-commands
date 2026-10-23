@@ -9,14 +9,12 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
 import { ENABLE_GIT_ADD_COMMIT_BLOCK } from "./config";
 import {
 	loadProjectConfig,
-	projectConfigPath,
 	PROJECT_CONFIG_RELATIVE_PATH,
-	resetProjectConfigCache,
+	projectConfigFileStatus,
+	writeProjectConfigFlag,
 } from "./project-config";
 
 export type GitGuardsAction = "status" | "off" | "on" | "usage";
@@ -48,26 +46,7 @@ export interface GitGuardsStatus {
 }
 
 export function gitGuardsStatus(cwd: string): GitGuardsStatus {
-	const path = projectConfigPath(cwd);
-
-	let fileExists = false;
-	try {
-		statSync(path);
-		fileExists = true;
-	} catch {
-		// No file: guards active by default.
-	}
-
-	let fileValid = !fileExists; // A missing file is not an invalid file.
-	if (fileExists) {
-		try {
-			const raw: unknown = JSON.parse(readFileSync(path, "utf8"));
-			fileValid = typeof raw === "object" && raw !== null && !Array.isArray(raw);
-		} catch {
-			fileValid = false;
-		}
-	}
-
+	const { fileExists, fileValid } = projectConfigFileStatus(cwd);
 	const disabledByFile = loadProjectConfig(cwd).disableGitGuards;
 
 	return {
@@ -84,34 +63,9 @@ export function gitGuardsStatus(cwd: string): GitGuardsStatus {
  * file content was invalid (and therefore replaced).
  */
 export function applyGitGuards(cwd: string, disable: boolean): boolean {
-	const path = projectConfigPath(cwd);
-
-	let previous: Record<string, unknown> = {};
-	let replacedInvalid = false;
-	try {
-		const raw: unknown = JSON.parse(readFileSync(path, "utf8"));
-		if (typeof raw === "object" && raw !== null && !Array.isArray(raw)) {
-			previous = raw as Record<string, unknown>;
-		} else {
-			replacedInvalid = true;
-		}
-	} catch {
-		// Missing file or unparseable content: start from a clean object.
-		try {
-			statSync(path);
-			replacedInvalid = true;
-		} catch {
-			// File simply absent: nothing lost.
-		}
-	}
-
-	previous.disableGitGuards = disable;
-
-	mkdirSync(dirname(path), { recursive: true });
-	writeFileSync(path, `${JSON.stringify(previous, null, "\t")}\n`, "utf8");
-	resetProjectConfigCache();
-
-	return replacedInvalid;
+	return writeProjectConfigFlag(cwd, (config) => {
+		config.disableGitGuards = disable;
+	});
 }
 
 function statusMessage(cwd: string): { text: string; level: "info" | "warning" | "error" } {

@@ -13,7 +13,15 @@ import {
 	parseGitGuardsArgs,
 } from "../src/git-guards-command";
 import { PROJECT_CONFIG_RELATIVE_PATH, loadProjectConfig } from "../src/project-config";
-import { check, checkFailures, isBlocked, makeProject } from "./helpers";
+import {
+	check,
+	checkFileStatusOnInvalidConfig,
+	checkUnknownArgument,
+	finishTest,
+	isBlocked,
+	makeProject,
+	setupCommandHarness,
+} from "./helpers";
 
 // ─── parseGitGuardsArgs ───────────────────────────────────────────────────────
 
@@ -48,14 +56,9 @@ const disabledFile = makeProject('{"disableGitGuards": true}');
 }
 rmSync(disabledFile, { recursive: true, force: true });
 
-const invalidFile = makeProject("{ not json");
-{
-	const status = gitGuardsStatus(invalidFile);
+checkFileStatusOnInvalidConfig("git-guards", gitGuardsStatus, (status) => {
 	check("invalid JSON → guards stay enabled", status.guardsEnabled, true);
-	check("invalid JSON → fileExists true", status.fileExists, true);
-	check("invalid JSON → fileValid false", status.fileValid, false);
-}
-rmSync(invalidFile, { recursive: true, force: true });
+});
 
 // ─── applyGitGuards ──────────────────────────────────────────────────────────
 
@@ -111,42 +114,14 @@ const broken = makeProject("{ not json");
 }
 rmSync(broken, { recursive: true, force: true });
 
-// ─── registerGitGuardsCommand (handler wiring with a fake pi/ctx) ───────────
-
-interface RecordedNotification {
-	message: string;
-	type: string;
-}
-
-function fakePi() {
-	const commands = new Map<string, { description?: string; handler: (args: string, ctx: unknown) => Promise<void> }>();
-	return {
-		commands,
-		registerCommand: (name: string, options: { description?: string; handler: (args: string, ctx: unknown) => Promise<void> }) => {
-			commands.set(name, options);
-		},
-	};
-}
-
-function fakeCtx(cwd: string) {
-	const notifications: RecordedNotification[] = [];
-	return {
-		notifications,
-		ctx: { cwd, ui: { notify: (message: string, type = "info") => notifications.push({ message, type }) } },
-	};
-}
-
 const commandProject = makeProject();
 {
-	const pi = fakePi();
-	registerGitGuardsCommand(pi as unknown as Parameters<typeof registerGitGuardsCommand>[0]);
-	check("command registered as git-guards", pi.commands.has("git-guards"), true);
-	check("command has a description", typeof pi.commands.get("git-guards")?.description, "string");
+	const { handler, ctx, notifications } = setupCommandHarness(
+		commandProject,
+		"git-guards",
+		(pi) => registerGitGuardsCommand(pi as unknown as Parameters<typeof registerGitGuardsCommand>[0]),
+	);
 
-	const handler = pi.commands.get("git-guards")!.handler;
-	const { ctx, notifications } = fakeCtx(commandProject);
-
-	ctx.cwd = commandProject;
 	handler("", ctx);
 	check("status notifies once", notifications.length, 1);
 	check("status mentions ACTIVE", notifications[0].message.includes("ACTIVE"), true);
@@ -164,20 +139,10 @@ const commandProject = makeProject();
 	check("on notifies once", notifications.length, 4);
 	check("on effect via loadProjectConfig", loadProjectConfig(commandProject).disableGitGuards, false);
 
-	handler("bogus", ctx);
-	check("unknown arg notifies once", notifications.length, 5);
-	check("unknown arg shows usage", notifications[4].message.includes("Usage:"), true);
-	check("unknown arg notification is an error", notifications[4].type, "error");
+	checkUnknownArgument(handler, ctx, notifications);
 }
 rmSync(commandProject, { recursive: true, force: true });
 
-// ─── result ──────────────────────────────────────────────────────────────────
-
 rmSync(noFile, { recursive: true, force: true });
 
-if (checkFailures() > 0) {
-	console.error(`\n${checkFailures()} git-guards command test(s) failed.`);
-	process.exit(1);
-} else {
-	console.log("\nAll git-guards command tests passed.");
-}
+finishTest("git-guards command");

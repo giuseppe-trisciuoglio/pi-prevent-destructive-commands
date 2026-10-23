@@ -111,3 +111,99 @@ export async function runIsolatedTest(name: string, body: (root: string) => Prom
 		process.exit(1);
 	});
 }
+
+export interface RecordedNotification {
+	message: string;
+	type: string;
+}
+
+export type FakeCommandHandler = (args: string, ctx: unknown) => Promise<void> | void;
+
+export interface FakePi {
+	commands: Map<string, { description?: string; handler: FakeCommandHandler }>;
+	registerCommand: (name: string, options: { description?: string; handler: FakeCommandHandler }) => void;
+}
+
+export function fakePi(): FakePi {
+	const commands = new Map<string, { description?: string; handler: FakeCommandHandler }>();
+	return {
+		commands,
+		registerCommand: (name, options) => {
+			commands.set(name, options);
+		},
+	};
+}
+
+export function fakeCtx(cwd: string) {
+	const notifications: RecordedNotification[] = [];
+	return {
+		notifications,
+		ctx: { cwd, ui: { notify: (message: string, type = "info") => notifications.push({ message, type }) } },
+	};
+}
+
+export interface CommandHarness {
+	handler: FakeCommandHandler;
+	ctx: { cwd: string; ui: { notify: (message: string, type?: string) => void } };
+	notifications: RecordedNotification[];
+}
+
+export function setupCommandHarness(
+	project: string,
+	commandName: string,
+	register: (pi: FakePi) => void,
+): CommandHarness {
+	const pi = fakePi();
+	register(pi);
+	check(`command registered as ${commandName}`, pi.commands.has(commandName), true);
+	check("command has a description", typeof pi.commands.get(commandName)?.description, "string");
+
+	const handler = pi.commands.get(commandName)!.handler;
+	const { ctx, notifications } = fakeCtx(project);
+	ctx.cwd = project;
+
+	return { handler, ctx, notifications };
+}
+
+export function checkUnknownArgument(
+	handler: FakeCommandHandler,
+	ctx: unknown,
+	notifications: RecordedNotification[],
+): void {
+	const before = notifications.length;
+	handler("bogus", ctx);
+	check("unknown arg notifies once", notifications.length, before + 1);
+	const last = notifications[notifications.length - 1];
+	check("unknown arg shows usage", last.message.includes("Usage:"), true);
+	check("unknown arg notification is an error", last.type, "error");
+}
+
+export interface ConfigFileStatus {
+	fileExists: boolean;
+	fileValid: boolean;
+}
+
+export function checkFileStatusOnInvalidConfig<T extends ConfigFileStatus>(
+	label: string,
+	statusFn: (cwd: string) => T,
+	extra?: (status: T) => void,
+): void {
+	const project = makeProject("{ not json");
+	try {
+		const status = statusFn(project);
+		extra?.(status);
+		check(`${label}: invalid JSON → fileExists true`, status.fileExists, true);
+		check(`${label}: invalid JSON → fileValid false`, status.fileValid, false);
+	} finally {
+		rmSync(project, { recursive: true, force: true });
+	}
+}
+
+export function finishTest(label: string): void {
+	if (checkFailures() > 0) {
+		console.error(`\n${checkFailures()} ${label} test(s) failed.`);
+		process.exit(1);
+	} else {
+		console.log(`\nAll ${label} tests passed.`);
+	}
+}

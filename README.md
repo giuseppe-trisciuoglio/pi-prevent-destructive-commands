@@ -19,6 +19,7 @@ A faithful port of Claude's [`prevent-destructive-commands.py`](https://github.c
 - **Recursive analysis** — Traverses command wrappers, shell invocations, pipelines, and nested commands to catch obfuscated attacks.
 - **Nx configuration guard** — In Nx workspaces, existing `package.json` and TypeScript configuration files are immutable to the agent; missing ones can still be created.
 - **Source comment guard** — The agent cannot introduce new comments into source files (Java, TypeScript, Dart, Python, SQL, HTML, and more) through writing tools or bash write vectors; existing comments may be carried over untouched and tooling directives (`@ts-ignore`, `eslint-disable`, …) stay allowed.
+- **Read-only mode** — `/read-only on` turns the project into an inspection-only workspace: `write`, `edit`, patch tools, `bash`, and `powershell` are blocked while `read`, `grep`, `find`, and `ls` keep working.
 - **Configurable** — Tune protection levels via simple flags in `src/config.ts`.
 - **Zero dependencies** — Lightweight, fast, and self-contained.
 - **79+ test cases** — Comprehensive smoke test suite validates all blocking rules.
@@ -112,7 +113,8 @@ Create `.pi/prevent-destructive-commands.json` in the project root to tune the g
 ```json
 {
 	"disableGitGuards": true,
-	"disableCommentGuard": true
+	"disableCommentGuard": true,
+	"readOnly": false
 }
 ```
 
@@ -120,6 +122,7 @@ Create `.pi/prevent-destructive-commands.json` in the project root to tune the g
 |------|---------|--------|
 | `disableGitGuards` | `false` | Disables the `git add` / `git commit` / `git push` guards. |
 | `disableCommentGuard` | `false` | Disables the source comment guard, allowing the agent to write comments into source files again. |
+| `readOnly` | `false` | When `true`, blocks every mutating tool call (`write`, `edit`, patch tools, `bash`, `powershell`) while read-only tools keep working. |
 
 Or use the `/git-guards` slash command from the pi TUI:
 
@@ -128,6 +131,18 @@ Or use the `/git-guards` slash command from the pi TUI:
 | `/git-guards` | Show whether the guards are active for the current project, and the state of the opt-out file. |
 | `/git-guards off` | Write `{"disableGitGuards": true}` (unrelated JSON keys are preserved). |
 | `/git-guards on` | Write `{"disableGitGuards": false}`. |
+
+### Read-Only Mode
+
+Use the `/read-only` slash command to make the project inspection-only:
+
+| Command | Effect |
+|---------|--------|
+| `/read-only` | Show whether read-only mode is active for the current project, and the state of the configuration file. |
+| `/read-only on` | Write `{"readOnly": true}` (unrelated JSON keys are preserved). |
+| `/read-only off` | Write `{"readOnly": false}`. |
+
+While read-only mode is active, the agent can inspect files with `read`, `grep`, `find`, and `ls`, but `write`, `edit`, every patch-style tool, `bash`, and `powershell` are blocked with a clear reason. Read-only mode is independent of the destructive-command, git, migration, Nx, and comment guards, and it defaults to off when the configuration file is missing or invalid.
 
 Notes:
 
@@ -147,6 +162,7 @@ prevent-destructive-commands/
 │   ├── config.ts         # Blacklists and behavior flags — tune protection here
 │   ├── tokenizer.ts      # Shell tokenizer (shlex-like)
 │   ├── checker.ts        # Recursive command walker (wrappers/shell/find/xargs)
+│   ├── read-only-command.ts # /read-only toggle and read-only tool-call gate
 │   ├── migration-guard.ts
 │   ├── nx-guard.ts       # Protects existing Nx package and TypeScript configuration files
 │   ├── comment-guard.ts  # Blocks new comments written into source files
