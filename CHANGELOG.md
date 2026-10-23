@@ -7,9 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- New guard: new comments in source files are blocked. Any tool call that would introduce a new comment into a source file (Java, TypeScript/JavaScript, Dart, Go, Rust, C/C++, C#, Swift, Kotlin, Scala, PHP, CSS/SCSS, Python, Ruby, shell, YAML, TOML, Terraform, GraphQL, SQL, Lua, Haskell, Elm, HTML/XML/SVG/Markdown) is stopped, covering `write`, `edit`, `apply_patch` (unified diff and `*** Begin Patch` formats), and bash write vectors (`cat > a.ts <<EOF`, `tee b.py <<EOF`, `echo "// x" >> c.ts`). Detection is string-aware (comment markers inside string literals are not comments), comments a file already contains may be carried over untouched, and shebang lines, tooling directives (`@ts-ignore`, `eslint-disable`, `biome-ignore`, `noqa`, …) and purely decorative lines are exempt. Opt out per project with `{"disableCommentGuard": true}` in the opt-out file. Adds `test/comment-guard-test.ts` (`npm run test:comment-guard`).
+- New guard: interactive `git commit` without a message option (bare `git commit`, `git commit -a`, `git commit --amend`, ...) is blocked because it opens the editor and hangs the session when the agent runs unattended. Applies unconditionally, even on projects that opted out of the git add/commit/push guards; commits with a message (`git commit -m x`, `-F file`, `--amend --no-edit`, ...) are unaffected.
+
 ### Changed
 
-- Internal refactor to remove duplicated code blocks (jscpd, min 50 tokens): token-scanning helpers (`forEachPositionalArg`, `collectPositionalParts`, `matchLongestSubcommand`) extracted to `src/rules/args.ts` and reused by the checker, the sensitive-file rule, and the AWS/GitHub CLI rules; patch-path extraction and tool-write mapping moved to shared `src/patch-paths.ts` (used by both `src/index.ts` and `src/nx-guard.ts`); duplicated test utilities (`check`, `makeProject`, `isBlocked`, case runner) consolidated into `test/helpers.ts`. No behavioral changes; full test suite and typecheck pass.
+- Extracted shared helpers to remove all code clones reported by jscpd (≥ 50 tokens): `src/rules/args.ts` (positional-argument scanning and longest-subcommand matching for the checker and the aws/gh/file-reading rules), `src/patch-paths.ts` (patch/file-path extraction shared by the extension entry point and the Nx guard), `src/token-segments.ts` (command-chain segmentation for the bash-level guards), and `test/helpers.ts` (shared test utilities: `check`, `makeProject`, `isBlocked`, `runCheckCases`, `runIsolatedTest`). No behavior change.
 
 ## [1.2.0] - 2026-09-28
 

@@ -9,6 +9,7 @@
  */
 
 import { tokenize } from "./tokenizer";
+import { forEachPositionalArg } from "./rules/args";
 import {
 	DELEGATION_COMMANDS,
 	FILE_READING_COMMANDS,
@@ -26,7 +27,6 @@ import { checkAws } from "./rules/aws";
 import { checkDocker } from "./rules/docker";
 import { checkFileReading } from "./rules/file-reading";
 import { checkGh } from "./rules/gh";
-import { forEachPositionalArg } from "./rules/args";
 import { checkGit } from "./rules/git";
 import { checkPathSensitive } from "./rules/path-sensitive";
 import { isOutsideCwd, resolvePath } from "./rules/path-utils";
@@ -187,15 +187,15 @@ export function checkTokens(
 
 		// Quoted-command wrappers: the first positional argument is a command
 		if (QUOTED_COMMAND_WRAPPERS.has(token)) {
-			let blocked: CheckResult | null = null;
+			let dangerous: CheckResult | undefined;
 			forEachPositionalArg(tokens, i, (arg) => {
 				const r = checkCommand(arg, currentCwd ?? cwd, depth + 1, boundaryCwd, options);
 				if (r.dangerous) {
-					blocked = r;
+					dangerous = r;
 					return false;
 				}
 			});
-			if (blocked !== null) return blocked;
+			if (dangerous) return dangerous;
 			i++;
 			continue;
 		}

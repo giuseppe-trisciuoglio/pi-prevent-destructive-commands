@@ -31,8 +31,6 @@ export function checkGh(tokens: string[], i: number): CheckResult {
 	// `gh <noun> <verb>`: match the longest known destructive subcommand pair.
 	const parts = collectPositionalParts(tokens, i + 1, 2);
 	const sub = matchLongestSubcommand(parts, GH_DESTRUCTIVE_SUBCOMMANDS);
-	if (sub !== null) {
-		return block(`destructive GitHub CLI operation: gh ${sub}`);
-	}
+	if (sub !== null) return block(`destructive GitHub CLI operation: gh ${sub}`);
 	return SAFE;
 }

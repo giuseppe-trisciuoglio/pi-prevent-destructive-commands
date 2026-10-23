@@ -7,7 +7,7 @@
 
 import { tokenize } from "../src/tokenizer";
 import { checkTokens } from "../src/checker";
-import { runCheckCases, type CheckCase } from "./helpers";
+import { type CheckCase, runCheckCases } from "./helpers";
 
 const CWD = "/home/user/projects/demo";
 

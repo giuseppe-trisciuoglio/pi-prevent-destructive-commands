@@ -31,11 +31,12 @@ export function forEachPositionalArg(
 
 /**
  * Collects up to `max` consecutive non-flag tokens starting at `start`.
+ * Stops at the end of the list, at a flag, or once `max` parts are gathered.
  */
 export function collectPositionalParts(tokens: string[], start: number, max: number): string[] {
 	const parts: string[] = [];
 	let j = start;
-	while (j < tokens.length && !tokens[j].startsWith("-") && parts.length < max) {
+	while (j < tokens.length && tokens[j] && !tokens[j].startsWith("-") && parts.length < max) {
 		parts.push(tokens[j]);
 		j++;
 	}

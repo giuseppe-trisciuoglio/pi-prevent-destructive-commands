@@ -37,6 +37,42 @@ function findGitSubcommandIndex(tokens: string[], start: number): number {
 	return -1;
 }
 
+/**
+ * Options that make `git commit` non-interactive, i.e. it does not open the
+ * editor and therefore cannot hang an unattended agent session.
+ */
+const COMMIT_MESSAGE_OPTIONS: ReadonlySet<string> = new Set([
+	"-m",
+	"--message",
+	"-F",
+	"--file",
+	"-C",
+	"--reuse-message",
+	"-c",
+	"--reedit-message",
+	"--no-edit",
+	"--fixup",
+]);
+
+const COMMIT_MESSAGE_OPTION_PREFIXES: readonly string[] = [
+	"--message=",
+	"--file=",
+	"--reuse-message=",
+	"--reedit-message=",
+	"--fixup=",
+];
+
+function commitProvidesMessage(rest: string[]): boolean {
+	for (const t of rest) {
+		if (COMMIT_MESSAGE_OPTIONS.has(t)) return true;
+		if (COMMIT_MESSAGE_OPTION_PREFIXES.some((p) => t.startsWith(p))) return true;
+		// Combined short options like "-am" (where the message arg follows) or
+		// inline short messages like "-mx".
+		if (/^-[a-zA-Z]*m[a-zA-Z]*$/.test(t)) return true;
+	}
+	return false;
+}
+
 export function checkGit(tokens: string[], i: number, gitGuardsEnabled: boolean): CheckResult {
 	const subIndex = findGitSubcommandIndex(tokens, i);
 	if (subIndex === -1) return SAFE;
@@ -88,6 +124,14 @@ export function checkGit(tokens: string[], i: number, gitGuardsEnabled: boolean)
 	}
 	if (gitGuardsEnabled && sub === "add") {
 		return block("git add stages changes to the index");
+	}
+	if (sub === "commit" && !commitProvidesMessage(rest)) {
+		// Applies unconditionally (like the push --force block): a bare
+		// interactive `git commit` opens $EDITOR and hangs the GUI when the
+		// agent commits autonomously, even on opted-out projects.
+		return block(
+			"git commit without a message opens the interactive editor and hangs the session — use -m to provide the commit message",
+		);
 	}
 	if (gitGuardsEnabled && sub === "commit") {
 		return block("git commit creates new commits in the repository");

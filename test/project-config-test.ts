@@ -6,7 +6,6 @@
 
 import { rmSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { check, isBlocked, makeProject } from "./helpers";
 import {
 	CONFIG_MUTATING_COMMAND,
 	DEFAULT_PROJECT_CONFIG,
@@ -14,25 +13,26 @@ import {
 	commandReferencesProjectConfig,
 	loadProjectConfig,
 } from "../src/project-config";
+import { check, checkFailures, isBlocked, makeProject } from "./helpers";
 
 // ─── loadProjectConfig ───────────────────────────────────────────────────────
 
-const missing = makeProject("pdc-project-config-");
+const missing = makeProject();
 check("missing file → defaults (guards active)", loadProjectConfig(missing), DEFAULT_PROJECT_CONFIG);
 rmSync(missing, { recursive: true, force: true });
 
-const disabled = makeProject("pdc-project-config-", JSON.stringify({ disableGitGuards: true }));
+const disabled = makeProject(JSON.stringify({ disableGitGuards: true }));
 check("disableGitGuards: true", loadProjectConfig(disabled).disableGitGuards, true);
 
-const enabled = makeProject("pdc-project-config-", JSON.stringify({ disableGitGuards: false }));
+const enabled = makeProject(JSON.stringify({ disableGitGuards: false }));
 check("disableGitGuards: false", loadProjectConfig(enabled).disableGitGuards, false);
 rmSync(enabled, { recursive: true, force: true });
 
-const invalid = makeProject("pdc-project-config-", "{ not json");
+const invalid = makeProject("{ not json");
 check("invalid JSON → defaults (guards active)", loadProjectConfig(invalid), DEFAULT_PROJECT_CONFIG);
 rmSync(invalid, { recursive: true, force: true });
 
-const otherKeys = makeProject("pdc-project-config-", JSON.stringify({ somethingElse: true }));
+const otherKeys = makeProject(JSON.stringify({ somethingElse: true }));
 check("unrelated keys → defaults (guards active)", loadProjectConfig(otherKeys), DEFAULT_PROJECT_CONFIG);
 rmSync(otherKeys, { recursive: true, force: true });
 
@@ -104,4 +104,5 @@ for (const command of harmless) {
 	);
 }
 
-console.log("\nAll project-config tests passed.");
+console.log(checkFailures() === 0 ? "\nAll project-config tests passed." : `\n${checkFailures()} test(s) failed.`);
+process.exit(checkFailures() === 0 ? 0 : 1);

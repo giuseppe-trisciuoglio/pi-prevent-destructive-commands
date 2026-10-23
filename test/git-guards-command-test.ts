@@ -4,21 +4,18 @@
  *   npx tsx test/git-guards-command-test.ts
  */
 
-import { existsSync, rmSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { check, isBlocked, makeProject } from "./helpers";
 import { registerGitGuardsCommand } from "../src/git-guards-command";
 import {
 	applyGitGuards,
 	gitGuardsStatus,
 	parseGitGuardsArgs,
 } from "../src/git-guards-command";
-import {
-	PROJECT_CONFIG_RELATIVE_PATH,
-	loadProjectConfig,
-} from "../src/project-config";
+import { PROJECT_CONFIG_RELATIVE_PATH, loadProjectConfig } from "../src/project-config";
+import { check, checkFailures, isBlocked, makeProject } from "./helpers";
 
-// ─── parseGitGuardsArgs ──────────────────────────────────────────────────────────
+// ─── parseGitGuardsArgs ───────────────────────────────────────────────────────
 
 check("no args → status", parseGitGuardsArgs(""), "status");
 check("'  ' → status", parseGitGuardsArgs("   "), "status");
@@ -32,7 +29,7 @@ check("'foo' → usage", parseGitGuardsArgs("foo"), "usage");
 
 // ─── gitGuardsStatus ─────────────────────────────────────────────────────────
 
-const noFile = makeProject("pdc-git-guards-cmd-");
+const noFile = makeProject();
 {
 	const status = gitGuardsStatus(noFile);
 	check("missing file → guards enabled", status.guardsEnabled, true);
@@ -41,7 +38,7 @@ const noFile = makeProject("pdc-git-guards-cmd-");
 	check("missing file → not disabled globally", status.disabledGlobally, false);
 }
 
-const disabledFile = makeProject("pdc-git-guards-cmd-", '{"disableGitGuards": true}');
+const disabledFile = makeProject('{"disableGitGuards": true}');
 {
 	const status = gitGuardsStatus(disabledFile);
 	check("disableGitGuards: true → guards disabled", status.guardsEnabled, false);
@@ -51,7 +48,7 @@ const disabledFile = makeProject("pdc-git-guards-cmd-", '{"disableGitGuards": tr
 }
 rmSync(disabledFile, { recursive: true, force: true });
 
-const invalidFile = makeProject("pdc-git-guards-cmd-", "{ not json");
+const invalidFile = makeProject("{ not json");
 {
 	const status = gitGuardsStatus(invalidFile);
 	check("invalid JSON → guards stay enabled", status.guardsEnabled, true);
@@ -62,7 +59,7 @@ rmSync(invalidFile, { recursive: true, force: true });
 
 // ─── applyGitGuards ──────────────────────────────────────────────────────────
 
-const empty = makeProject("pdc-git-guards-cmd-");
+const empty = makeProject();
 {
 	const replacedInvalid = applyGitGuards(empty, true);
 	check("off on missing file → no 'replaced invalid' flag", replacedInvalid, false);
@@ -73,6 +70,19 @@ const empty = makeProject("pdc-git-guards-cmd-");
 
 	// End-to-end guard behavior with the new state.
 	check("guards off → git commit allowed", isBlocked("git commit -m x", empty, false), false);
+
+	// Interactive-commit hang prevention: blocked even with guards off.
+	check("guards off → bare git commit still blocked", isBlocked("git commit", empty, false), true);
+	check("guards off → git commit -a still blocked", isBlocked("git commit -a", empty, false), true);
+	check("guards off → git commit --amend still blocked", isBlocked("git commit --amend", empty, false), true);
+	check("guards off → git commit --no-verify still blocked", isBlocked("git commit --no-verify", empty, false), true);
+	check("guards off → git commit -am x allowed", isBlocked("git commit -am x", empty, false), false);
+	check("guards off → git commit -F msg.txt allowed", isBlocked("git commit -F msg.txt", empty, false), false);
+	check("guards off → git commit --amend --no-edit allowed", isBlocked("git commit --amend --no-edit", empty, false), false);
+	check("guards off → git commit --message=x allowed", isBlocked("git commit --message=x", empty, false), false);
+	check("guards on → bare git commit blocked", isBlocked("git commit", empty, true), true);
+	check("guards on → git commit --amend blocked", isBlocked("git commit --amend", empty, true), true);
+
 	check("guards off → git push allowed", isBlocked("git push", empty, false), false);
 	check("guards off → git push --force still blocked", isBlocked("git push --force", empty, false), true);
 	check("guards off → git reset --hard still blocked", isBlocked("git reset --hard", empty, false), true);
@@ -91,7 +101,7 @@ const empty = makeProject("pdc-git-guards-cmd-");
 }
 rmSync(empty, { recursive: true, force: true });
 
-const broken = makeProject("pdc-git-guards-cmd-", "{ not json");
+const broken = makeProject("{ not json");
 {
 	const replacedInvalid = applyGitGuards(broken, true);
 	check("off on invalid file → reports replacement", replacedInvalid, true);
@@ -126,7 +136,7 @@ function fakeCtx(cwd: string) {
 	};
 }
 
-const commandProject = makeProject("pdc-git-guards-cmd-");
+const commandProject = makeProject();
 {
 	const pi = fakePi();
 	registerGitGuardsCommand(pi as unknown as Parameters<typeof registerGitGuardsCommand>[0]);
@@ -165,4 +175,9 @@ rmSync(commandProject, { recursive: true, force: true });
 
 rmSync(noFile, { recursive: true, force: true });
 
-console.log("\nAll git-guards command tests passed.");
+if (checkFailures() > 0) {
+	console.error(`\n${checkFailures()} git-guards command test(s) failed.`);
+	process.exit(1);
+} else {
+	console.log("\nAll git-guards command tests passed.");
+}

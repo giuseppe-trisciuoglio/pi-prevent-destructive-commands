@@ -6,11 +6,9 @@ import { type CheckResult, SAFE, block } from "./types";
 
 export function checkAws(tokens: string[], i: number): CheckResult {
 	let j = i + 1;
-	while (j < tokens.length && tokens[j].startsWith("--")) j++;
+	while (j < tokens.length && tokens[j]?.startsWith("--")) j++;
 	const parts = collectPositionalParts(tokens, j, 3);
 	const sub = matchLongestSubcommand(parts, AWS_DESTRUCTIVE_SUBCOMMANDS);
-	if (sub !== null) {
-		return block(`destructive AWS CLI operation: aws ${sub}`);
-	}
+	if (sub !== null) return block(`destructive AWS CLI operation: aws ${sub}`);
 	return SAFE;
 }
