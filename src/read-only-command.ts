@@ -1,11 +1,9 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
 import {
 	loadProjectConfig,
-	projectConfigPath,
 	PROJECT_CONFIG_RELATIVE_PATH,
-	resetProjectConfigCache,
+	projectConfigFileStatus,
+	writeProjectConfigFlag,
 } from "./project-config";
 
 export type ReadOnlyAction = "status" | "off" | "on" | "usage";
@@ -31,24 +29,7 @@ export interface ReadOnlyStatus {
 }
 
 export function readOnlyStatus(cwd: string): ReadOnlyStatus {
-	const path = projectConfigPath(cwd);
-	let fileExists = false;
-	try {
-		statSync(path);
-		fileExists = true;
-	} catch {
-	}
-
-	let fileValid = !fileExists;
-	if (fileExists) {
-		try {
-			const raw: unknown = JSON.parse(readFileSync(path, "utf8"));
-			fileValid = typeof raw === "object" && raw !== null && !Array.isArray(raw);
-		} catch {
-			fileValid = false;
-		}
-	}
-
+	const { fileExists, fileValid } = projectConfigFileStatus(cwd);
 	return {
 		readOnly: loadProjectConfig(cwd).readOnly,
 		fileExists,
@@ -57,32 +38,9 @@ export function readOnlyStatus(cwd: string): ReadOnlyStatus {
 }
 
 export function applyReadOnly(cwd: string, value: boolean): boolean {
-	const path = projectConfigPath(cwd);
-
-	let previous: Record<string, unknown> = {};
-	let replacedInvalid = false;
-	try {
-		const raw: unknown = JSON.parse(readFileSync(path, "utf8"));
-		if (typeof raw === "object" && raw !== null && !Array.isArray(raw)) {
-			previous = raw as Record<string, unknown>;
-		} else {
-			replacedInvalid = true;
-		}
-	} catch {
-		try {
-			statSync(path);
-			replacedInvalid = true;
-		} catch {
-		}
-	}
-
-	previous.readOnly = value;
-
-	mkdirSync(dirname(path), { recursive: true });
-	writeFileSync(path, `${JSON.stringify(previous, null, "\t")}\n`, "utf8");
-	resetProjectConfigCache();
-
-	return replacedInvalid;
+	return writeProjectConfigFlag(cwd, (config) => {
+		config.readOnly = value;
+	});
 }
 
 function statusMessage(cwd: string): { text: string; level: "info" | "warning" | "error" } {

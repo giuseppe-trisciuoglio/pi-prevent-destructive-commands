@@ -10,7 +10,14 @@ import {
 	registerReadOnlyCommand,
 } from "../src/read-only-command";
 import { PROJECT_CONFIG_RELATIVE_PATH, loadProjectConfig } from "../src/project-config";
-import { check, checkFailures, makeProject } from "./helpers";
+import {
+	check,
+	checkFileStatusOnInvalidConfig,
+	checkUnknownArgument,
+	finishTest,
+	makeProject,
+	setupCommandHarness,
+} from "./helpers";
 
 check("no args → status", parseReadOnlyArgs(""), "status");
 check("'  ' → status", parseReadOnlyArgs("   "), "status");
@@ -38,14 +45,9 @@ const enabledFile = makeProject('{"readOnly": true}');
 }
 rmSync(enabledFile, { recursive: true, force: true });
 
-const invalidFile = makeProject("{ not json");
-{
-	const status = readOnlyStatus(invalidFile);
+checkFileStatusOnInvalidConfig("read-only", readOnlyStatus, (status) => {
 	check("invalid JSON → readOnly false", status.readOnly, false);
-	check("invalid JSON → fileExists true", status.fileExists, true);
-	check("invalid JSON → fileValid false", status.fileValid, false);
-}
-rmSync(invalidFile, { recursive: true, force: true });
+});
 
 const empty = makeProject();
 {
@@ -116,40 +118,14 @@ const readOnlyProject = makeProject('{"readOnly": true, "disableGitGuards": true
 }
 rmSync(readOnlyProject, { recursive: true, force: true });
 
-interface RecordedNotification {
-	message: string;
-	type: string;
-}
-
-function fakePi() {
-	const commands = new Map<string, { description?: string; handler: (args: string, ctx: unknown) => Promise<void> }>();
-	return {
-		commands,
-		registerCommand: (name: string, options: { description?: string; handler: (args: string, ctx: unknown) => Promise<void> }) => {
-			commands.set(name, options);
-		},
-	};
-}
-
-function fakeCtx(cwd: string) {
-	const notifications: RecordedNotification[] = [];
-	return {
-		notifications,
-		ctx: { cwd, ui: { notify: (message: string, type = "info") => notifications.push({ message, type }) } },
-	};
-}
-
 const commandProject = makeProject();
 {
-	const pi = fakePi();
-	registerReadOnlyCommand(pi as unknown as Parameters<typeof registerReadOnlyCommand>[0]);
-	check("command registered as read-only", pi.commands.has("read-only"), true);
-	check("command has a description", typeof pi.commands.get("read-only")?.description, "string");
+	const { handler, ctx, notifications } = setupCommandHarness(
+		commandProject,
+		"read-only",
+		(pi) => registerReadOnlyCommand(pi as unknown as Parameters<typeof registerReadOnlyCommand>[0]),
+	);
 
-	const handler = pi.commands.get("read-only")!.handler;
-	const { ctx, notifications } = fakeCtx(commandProject);
-
-	ctx.cwd = commandProject;
 	handler("", ctx);
 	check("status notifies once", notifications.length, 1);
 	check("status mentions INACTIVE", notifications[0].message.includes("INACTIVE"), true);
@@ -167,18 +143,10 @@ const commandProject = makeProject();
 	check("off notifies once", notifications.length, 4);
 	check("off effect via loadProjectConfig", loadProjectConfig(commandProject).readOnly, false);
 
-	handler("bogus", ctx);
-	check("unknown arg notifies once", notifications.length, 5);
-	check("unknown arg shows usage", notifications[4].message.includes("Usage:"), true);
-	check("unknown arg notification is an error", notifications[4].type, "error");
+	checkUnknownArgument(handler, ctx, notifications);
 }
 rmSync(commandProject, { recursive: true, force: true });
 
 rmSync(noFile, { recursive: true, force: true });
 
-if (checkFailures() > 0) {
-	console.error(`\n${checkFailures()} read-only command test(s) failed.`);
-	process.exit(1);
-} else {
-	console.log("\nAll read-only command tests passed.");
-}
+finishTest("read-only command");
