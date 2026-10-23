@@ -67,7 +67,7 @@ Anything the extractor cannot parse unambiguously (here-strings `<<<`, variable 
 ### Via pi Marketplace
 
 ```bash
-pi install @giuseppetrisciuoglio/pi-prevent-destructive-commands
+pi install npm:@giuseppe.trisciuoglio/pi-prevent-destructive-commands
 ```
 
 ### Manual Installation
