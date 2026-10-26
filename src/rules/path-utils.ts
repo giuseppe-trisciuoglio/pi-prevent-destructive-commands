@@ -3,8 +3,9 @@
  * (e.g. `rm`) targets a location outside the working directory.
  */
 
+import { realpathSync } from "node:fs";
 import { isAbsolute, normalize, resolve } from "node:path";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { type CheckResult, SAFE, block } from "./types";
 
 function expandTilde(p: string): string {
@@ -20,6 +21,38 @@ function expandTilde(p: string): string {
 /** Returns `true` if the path contains variables/globs resolvable only at runtime. */
 function hasUnresolvableParts(p: string): boolean {
 	return /\$[{(]?|\*|\?|\[/.test(p) || p === "{}";
+}
+
+function stripTrailingSlashes(p: string): string {
+	const trimmed = p.replace(/\/+$/, "");
+	return trimmed.length > 0 ? trimmed : "/";
+}
+
+function canonicalDir(directory: string): string {
+	const trimmed = stripTrailingSlashes(directory);
+	try {
+		return stripTrailingSlashes(realpathSync(trimmed));
+	} catch {
+		return trimmed;
+	}
+}
+
+const SYSTEM_TEMP_ROOT_SET: ReadonlySet<string> = new Set(
+	[tmpdir(), "/tmp", "/private/tmp"].flatMap((directory) => [
+		stripTrailingSlashes(directory),
+		canonicalDir(directory),
+	]),
+);
+
+const SYSTEM_TEMP_ROOTS: readonly string[] = [...SYSTEM_TEMP_ROOT_SET];
+
+export function isSystemTempPath(resolvedPath: string): boolean {
+	const target = stripTrailingSlashes(resolvedPath);
+	return SYSTEM_TEMP_ROOTS.some((root) => root === "/" || target === root || target.startsWith(`${root}/`));
+}
+
+export function isSystemTempRoot(resolvedPath: string): boolean {
+	return SYSTEM_TEMP_ROOT_SET.has(stripTrailingSlashes(resolvedPath));
 }
 
 /**
@@ -55,7 +88,10 @@ export function isOutsideCwd(
 	if (resolved === null) {
 		return block(`cannot safely resolve path: ${JSON.stringify(p)}`);
 	}
-	const boundaryRoot = boundaryCwd.replace(/\/+$/, "");
+	if (isSystemTempPath(resolved)) {
+		return SAFE;
+	}
+	const boundaryRoot = stripTrailingSlashes(boundaryCwd);
 	const boundaryPrefix = `${boundaryRoot}/`;
 	if (resolved === boundaryRoot || `${resolved}/`.startsWith(boundaryPrefix)) {
 		return SAFE;
