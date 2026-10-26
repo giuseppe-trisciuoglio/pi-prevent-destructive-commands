@@ -14,17 +14,17 @@ import { dirname, join } from "node:path";
 export const PROJECT_CONFIG_RELATIVE_PATH = ".pi/prevent-destructive-commands.json";
 
 export interface ProjectConfig {
-	/** When true, the `git add` / `git commit` / `git push` guards are disabled. */
 	disableGitGuards: boolean;
-	/** When true, the source comment guard is disabled. */
 	disableCommentGuard: boolean;
 	readOnly: boolean;
+	disableWorkdirGuard: boolean;
 }
 
 export const DEFAULT_PROJECT_CONFIG: ProjectConfig = {
 	disableGitGuards: false,
 	disableCommentGuard: false,
 	readOnly: false,
+	disableWorkdirGuard: false,
 };
 
 /** Absolute path of the project configuration file for a given cwd. */
@@ -67,6 +67,7 @@ export function loadProjectConfig(cwd: string): ProjectConfig {
 				disableGitGuards: fields.disableGitGuards === true,
 				disableCommentGuard: fields.disableCommentGuard === true,
 				readOnly: fields.readOnly === true,
+				disableWorkdirGuard: fields.disableWorkdirGuard === true,
 			};
 		}
 	} catch {

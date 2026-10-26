@@ -20,6 +20,7 @@ import {
 	loadProjectConfig,
 } from "./project-config";
 import { tokenize } from "./tokenizer";
+import { checkCommandWorkdir, checkToolInputWorkdir } from "./rules/workdir-guard";
 import { registerGitGuardsCommand } from "./git-guards-command";
 import { readOnlyBlockResult, registerReadOnlyCommand } from "./read-only-command";
 
@@ -129,6 +130,24 @@ export default function (pi: ExtensionAPI) {
 			}
 		}
 
+		if (!projectConfig.disableWorkdirGuard && !isToolCallEventType("bash", event)) {
+			const input = event.input as Record<string, unknown>;
+			const extraPaths: string[] = [];
+			if (typeof input.path === "string") {
+				extraPaths.push(input.path);
+			}
+			const workdirBlock = checkToolInputWorkdir(
+				event.toolName,
+				input,
+				pathsFromPatch,
+				ctx.cwd,
+				extraPaths,
+			);
+			if (workdirBlock.dangerous) {
+				return { block: true, reason: `[prevent-destructive-commands] Blocked: ${workdirBlock.reason}` };
+			}
+		}
+
 		if (!isToolCallEventType("bash", event)) return undefined;
 
 		const command = event.input.command;
@@ -141,6 +160,13 @@ export default function (pi: ExtensionAPI) {
 			gitGuardsEnabled,
 		});
 		if (!dangerous) return undefined;
+
+		if (!projectConfig.disableWorkdirGuard) {
+			const workdirBlock = checkCommandWorkdir(command, ctx.cwd);
+			if (workdirBlock.dangerous) {
+				return { block: true, reason: `[prevent-destructive-commands] Blocked: ${workdirBlock.reason}` };
+			}
+		}
 
 		return {
 			block: true,
