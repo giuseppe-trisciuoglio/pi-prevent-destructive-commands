@@ -20,9 +20,10 @@ A faithful port of Claude's [`prevent-destructive-commands.py`](https://github.c
 - **Nx configuration guard** — In Nx workspaces, existing `package.json` and TypeScript configuration files are immutable to the agent; missing ones can still be created.
 - **Source comment guard** — The agent cannot introduce new comments into source files (Java, TypeScript, Dart, Python, SQL, HTML, and more) through writing tools or bash write vectors; existing comments may be carried over untouched and tooling directives (`@ts-ignore`, `eslint-disable`, …) stay allowed.
 - **Read-only mode** — `/read-only on` turns the project into an inspection-only workspace: `write`, `edit`, patch tools, `bash`, and `powershell` are blocked while `read`, `grep`, `find`, and `ls` keep working.
+- **Workdir boundary guard** — Every file read, write, edit, and delete is confined to the working directory where pi runs. System temp directories (`/tmp`, `os.tmpdir()`) are the only exception; the temp root itself stays protected.
 - **Configurable** — Tune protection levels via simple flags in `src/config.ts`.
 - **Zero dependencies** — Lightweight, fast, and self-contained.
-- **79+ test cases** — Comprehensive smoke test suite validates all blocking rules.
+- **Extensive test suite** — Smoke tests plus guard-specific and slash-command tests validate every blocking rule.
 
 ## What Gets Blocked
 
@@ -38,6 +39,7 @@ All rules are defined in [`src/config.ts`](src/config.ts) and can be customized.
 | **Destructive Docker** | `docker rm` / `rmi`, `docker container/image/volume/network rm`, `docker * prune`, `docker compose down -v`, `docker compose rm`, `docker context rm`, `docker swarm leave --force` |
 | **Destructive GitHub CLI** | `gh api -X DELETE` / `gh api --method DELETE`, `gh repo delete` / `rename`, `gh release delete`, `gh gist delete`, `gh secret delete`, `gh variable delete`, `gh label delete`, `gh workflow disable`, `gh run delete` |
 | **Destructive AWS CLI** | `aws s3 rm`, `aws ec2 terminate-instances`, `aws rds delete-db-instance`, `aws cloudformation delete-stack`, and 50+ more subcommands (full list in `src/config.ts`) |
+| **Paths outside the workdir** | Any tool or bash command touching a path that resolves outside the working directory: `cat /etc/passwd`, `cp ~/.ssh/id_rsa ./`, `write`/`edit` to `../outside.ts`, `apply_patch` creating files outside cwd, `cd /etc && cat passwd`. Paths under a system temp directory (`/tmp`, `os.tmpdir()`) are allowed; the temp root itself is not *(see the per-project opt-out below)* |
 | **Sensitive file reads** | `cat`, `grep`, etc. on `.env`, SSH keys, `.pem` files — **disabled by default** via `ENABLE_SENSITIVE_FILE_CHECK` *(see Configuration)* |
 | **Existing Nx configuration** | `package.json`, `tsconfig.json`, `tsconfig.base.json`, `tsconfig.lib.json`, and `tsconfig.spec.json` anywhere below a workspace containing `nx.json`. Creating a missing file is allowed; changing or deleting an existing file is blocked. |
 | **New comments in source files** | Any tool call that introduces a **new** comment into a source file: `write`/`edit`/`apply_patch` touching Java, TypeScript/JavaScript, Dart, Go, Rust, C/C++, C#, Swift, Kotlin, Scala, PHP, CSS/SCSS, Python, Ruby, shell, YAML, TOML, Terraform, GraphQL, SQL, Lua, Haskell, Elm, HTML/XML/SVG/Markdown files, plus bash write vectors (`cat > a.ts <<EOF`, `tee b.py <<EOF`, `echo "// x" >> c.ts`). Comments already in the file may be carried over; shebang lines, tooling directives (`@ts-ignore`, `eslint-disable`, `biome-ignore`, `noqa`, …) and purely decorative lines are exempt *(see the per-project opt-out below)* |
@@ -114,7 +116,8 @@ Create `.pi/prevent-destructive-commands.json` in the project root to tune the g
 {
 	"disableGitGuards": true,
 	"disableCommentGuard": true,
-	"readOnly": false
+	"readOnly": false,
+	"disableWorkdirGuard": false
 }
 ```
 
@@ -123,6 +126,7 @@ Create `.pi/prevent-destructive-commands.json` in the project root to tune the g
 | `disableGitGuards` | `false` | Disables the `git add` / `git commit` / `git push` guards. |
 | `disableCommentGuard` | `false` | Disables the source comment guard, allowing the agent to write comments into source files again. |
 | `readOnly` | `false` | When `true`, blocks every mutating tool call (`write`, `edit`, patch tools, `bash`, `powershell`) while read-only tools keep working. |
+| `disableWorkdirGuard` | `false` | Disables the workdir boundary guard, allowing the agent to touch paths outside the working directory again. |
 
 Or use the `/git-guards` slash command from the pi TUI:
 
@@ -144,6 +148,25 @@ Use the `/read-only` slash command to make the project inspection-only:
 
 While read-only mode is active, the agent can inspect files with `read`, `grep`, `find`, and `ls`, but `write`, `edit`, every patch-style tool, `bash`, and `powershell` are blocked with a clear reason. Read-only mode is independent of the destructive-command, git, migration, Nx, and comment guards, and it defaults to off when the configuration file is missing or invalid.
 
+### Workdir Boundary Guard
+
+The workdir boundary guard keeps every filesystem operation inside the working directory where pi is running. It covers bash commands (including `cd` tracking inside a command chain) and the file tools (`read`, `write`, `edit`, `apply_patch`).
+
+Allowed without any opt-out:
+
+- paths inside the working directory, relative or absolute;
+- paths under a system temp directory (`/tmp`, `os.tmpdir()`), so temp files keep working.
+
+Blocked: any path resolving outside the workdir — parent traversals (`../..`), absolute paths such as `/etc/passwd`, home-directory shortcuts (`~/file`), unresolvable variables (`$HOME/x`), `cd` out of the boundary, and the temp root itself (`rm -rf /tmp`).
+
+| Command | Effect |
+|---------|--------|
+| `/workdir-guard` | Show whether the guard is active for the current project, and the state of the configuration file. |
+| `/workdir-guard off` | Write `{"disableWorkdirGuard": true}` (unrelated JSON keys are preserved). |
+| `/workdir-guard on` | Write `{"disableWorkdirGuard": false}`. |
+
+The exception for system temp directories applies to every guard, so `rm /tmp/scratch.log` and `tee /tmp/out.txt` keep working while the workdir boundary stays enforced.
+
 Notes:
 
 - Forceful and deleting push variants (`--force`, `-f`, `--force-with-lease`, `-d`, `--delete`) are **always blocked** and cannot be opted out.
@@ -163,6 +186,7 @@ prevent-destructive-commands/
 │   ├── tokenizer.ts      # Shell tokenizer (shlex-like)
 │   ├── checker.ts        # Recursive command walker (wrappers/shell/find/xargs)
 │   ├── read-only-command.ts # /read-only toggle and read-only tool-call gate
+│   ├── workdir-guard-command.ts # /workdir-guard toggle
 │   ├── migration-guard.ts
 │   ├── nx-guard.ts       # Protects existing Nx package and TypeScript configuration files
 │   ├── comment-guard.ts  # Blocks new comments written into source files
@@ -176,7 +200,8 @@ prevent-destructive-commands/
 │       ├── docker.ts          # docker rm, system prune, ...
 │       ├── aws.ts             # aws s3 rm, ec2 terminate-instances, ...
 │       ├── file-reading.ts    # sensitive file read detection
-│       └── path-sensitive.ts  # rm/rmdir/... outside-cwd detection
+│       ├── path-sensitive.ts  # rm/rmdir/... outside-cwd detection
+│       └── workdir-guard.ts   # workdir boundary guard (filesystem tools + bash)
 ├── test/
 │   ├── smoke-test.ts        # Standalone test suite (79+ cases)
 │   ├── helpers.ts           # Shared test utilities (check, makeProject, runCheckCases, ...)
@@ -193,7 +218,7 @@ prevent-destructive-commands/
 
 ## Testing
 
-Run the full test suite (command safety, migration, Nx, and end-to-end checks):
+Run the full test suite (command safety, migration, Nx, workdir boundary, slash commands, and end-to-end checks):
 
 ```bash
 npm test
@@ -208,12 +233,14 @@ npm run test:smoke
 npm run test:heredoc
 npm run test:nx-guard
 npm run test:comment-guard
+npm run test:workdir-guard
+npm run test:workdir-guard-command
 ```
 
-# Or directly with tsx
-npx tsx test/smoke-test.ts
+Or run a single file directly with tsx or jiti:
 
-# Or with jiti
+```bash
+npx tsx test/smoke-test.ts
 npx jiti test/smoke-test.ts
 ```
 

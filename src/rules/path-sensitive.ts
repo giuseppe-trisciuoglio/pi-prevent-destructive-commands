@@ -1,7 +1,7 @@
 /** Detects path-sensitive commands (`rm`, `rmdir`, ...) targeting paths outside the cwd. */
 
 import { SHELL_OPERATORS } from "../config";
-import { isOutsideCwd } from "./path-utils";
+import { isOutsideCwd, isSystemTempRoot, resolvePath } from "./path-utils";
 import { type CheckResult, SAFE, block } from "./types";
 
 /**
@@ -34,6 +34,12 @@ export function checkPathSensitive(
 			continue;
 		}
 		hasExplicitTarget = true;
+		const resolvedTarget = resolvePath(arg, resolveCwd);
+		if (resolvedTarget !== null && isSystemTempRoot(resolvedTarget)) {
+			return block(
+				`${JSON.stringify(token)} targets the system temp directory root itself — temp files are allowed, the temp root is not`,
+			);
+		}
 		const r = isOutsideCwd(arg, resolveCwd, boundaryCwd);
 		if (r.dangerous) {
 			return block(

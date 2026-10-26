@@ -51,7 +51,9 @@ const cases: CheckCase[] = [
 	{ command: "rm ~/.ssh/id_rsa", expectBlocked: true, note: "outside cwd" },
 	{ command: "rm ../../secret.txt", expectBlocked: true, note: "outside cwd" },
 	{ command: "rm -rf /", expectBlocked: true, note: "outside cwd" },
-	{ command: "rmdir /tmp/old", expectBlocked: true },
+	{ command: "rmdir /tmp/old", expectBlocked: false, note: "system temp is the one allowed exception" },
+	{ command: "rm -rf /tmp", expectBlocked: true, note: "the temp root itself is never a valid target" },
+	{ command: "rm -rf /tmp/", expectBlocked: true, note: "the temp root itself is never a valid target" },
 	{ command: "shred ./secrets.txt", expectBlocked: false, note: "inside cwd" },
 
 	// ─── cd tracking ────────────────────────────────────────────────────────
@@ -61,9 +63,9 @@ const cases: CheckCase[] = [
 		note: "cd shifts effective cwd to /, so etc/passwd resolves to /etc/passwd (outside real cwd)",
 	},
 	{
-		command: "cd /tmp && rm -rf secrets",
+		command: "cd /etc && rm -rf secrets",
 		expectBlocked: true,
-		note: "cd shifts effective cwd to /tmp, target resolves outside real cwd",
+		note: "cd shifts effective cwd to /etc, target resolves outside real cwd",
 	},
 	{
 		command: "cd ..; rm secret.txt",

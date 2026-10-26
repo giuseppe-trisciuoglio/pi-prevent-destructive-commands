@@ -1,14 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { checkTokens } from "../src/checker";
 
 async function main(): Promise<void> {
-	const root = mkdtempSync(join(tmpdir(), "find-start-path-"));
-	const outside = mkdtempSync(join(tmpdir(), "non-find-start-path-"));
+	const root = "/home/user/projects/demo";
+	const outside = "/home/user/other";
 
-	try {
+	{
 		// Safe: default start path and explicit in-boundary paths.
 		assert.equal(checkTokens(["find", ".", "-name", "*.ts"], root).dangerous, false);
 		assert.equal(checkTokens(["find", "src", "test", "-type", "f"], root).dangerous, false);
@@ -45,9 +43,6 @@ async function main(): Promise<void> {
 		);
 
 		console.log("find start path tests passed");
-	} finally {
-		rmSync(root, { recursive: true, force: true });
-		rmSync(outside, { recursive: true, force: true });
 	}
 }
 
