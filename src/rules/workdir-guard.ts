@@ -1,10 +1,7 @@
-import { tokenize } from "../tokenizer";
 import { SHELL_OPERATORS } from "../config";
-import { isOutsideCwd, resolvePath } from "./path-utils";
+import { tokenize } from "../tokenizer";
+import { isOutsideCwd, isSystemTempRoot, resolvePath } from "./path-utils";
 import { type CheckResult, SAFE, block } from "./types";
-import { tmpdir } from "node:os";
-
-const SYSTEM_TEMP_DIRS: readonly string[] = [tmpdir(), "/tmp"];
 
 function looksLikePath(token: string): boolean {
 	if (!token) return false;
@@ -17,31 +14,28 @@ function looksLikePath(token: string): boolean {
 	return false;
 }
 
-function isSystemTemp(absPath: string): boolean {
-	const normalized = absPath.replace(/\/+$/, "/");
-	return SYSTEM_TEMP_DIRS.some((t) => {
-		const root = t.replace(/\/+$/, "/");
-		return normalized === root || normalized.startsWith(root);
-	});
-}
-
 export function checkPathInsideWorkdir(
 	p: string,
 	resolveCwd: string,
 	boundaryCwd: string,
 ): CheckResult {
-	const abs = resolvePath(p, resolveCwd);
-	if (abs === null) {
+	const resolved = resolvePath(p, resolveCwd);
+	if (resolved === null) {
 		return block(`cannot safely resolve path: ${JSON.stringify(p)}`);
 	}
-	if (isSystemTemp(abs)) {
-		return SAFE;
+	if (!p.endsWith("/") && isSystemTempRoot(resolved)) {
+		return block(
+			`${JSON.stringify(p)} targets the system temp directory root itself — temp files are allowed, the temp root is not`,
+		);
 	}
 	return isOutsideCwd(p, resolveCwd, boundaryCwd);
 }
 
 export function checkCommandWorkdir(command: string, cwd: string): CheckResult {
 	const tokens = tokenize(command);
+	const cwdStack: string[] = [];
+	let currentCwd = cwd;
+
 	let i = 0;
 	while (i < tokens.length) {
 		const token = tokens[i];
@@ -53,7 +47,13 @@ export function checkCommandWorkdir(command: string, cwd: string): CheckResult {
 			i++;
 			continue;
 		}
-		if (token === "(" || token === ")") {
+		if (token === "(") {
+			cwdStack.push(currentCwd);
+			i++;
+			continue;
+		}
+		if (token === ")") {
+			currentCwd = cwdStack.pop() ?? cwd;
 			i++;
 			continue;
 		}
@@ -62,16 +62,31 @@ export function checkCommandWorkdir(command: string, cwd: string): CheckResult {
 			let target: string | null = null;
 			while (j < tokens.length) {
 				const arg = tokens[j];
-				if (!arg || SHELL_OPERATORS.has(arg) || arg.startsWith("-")) break;
+				if (!arg || SHELL_OPERATORS.has(arg)) break;
+				if (arg === "-") {
+					return block(`\"cd -\" changes to a directory that cannot be statically resolved`);
+				}
+				if (arg.startsWith("-")) {
+					j++;
+					continue;
+				}
 				target = arg;
 				j++;
 				break;
 			}
+			if (target === null) {
+				return block(`\"cd\" without a target moves to the home directory, outside the working directory`);
+			}
+			const inside = checkPathInsideWorkdir(target, currentCwd, cwd);
+			if (inside.dangerous) {
+				return block(`\"cd\" leaves the working directory — ${inside.reason}`);
+			}
+			currentCwd = resolvePath(target, currentCwd) ?? currentCwd;
 			i = j;
 			continue;
 		}
 		if (looksLikePath(token)) {
-			const r = checkPathInsideWorkdir(token, cwd, cwd);
+			const r = checkPathInsideWorkdir(token, currentCwd, cwd);
 			if (r.dangerous) return r;
 		}
 		i++;

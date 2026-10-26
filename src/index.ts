@@ -23,6 +23,7 @@ import { tokenize } from "./tokenizer";
 import { checkCommandWorkdir, checkToolInputWorkdir } from "./rules/workdir-guard";
 import { registerGitGuardsCommand } from "./git-guards-command";
 import { readOnlyBlockResult, registerReadOnlyCommand } from "./read-only-command";
+import { registerWorkdirGuardCommand } from "./workdir-guard-command";
 
 function pathsFromPatch(patch: string): string[] {
 	return extractPatchPaths(patch, [
@@ -55,6 +56,7 @@ function commandReferencesMigrationPath(command: string, cwd: string, migrationD
 export default function (pi: ExtensionAPI) {
 	registerGitGuardsCommand(pi);
 	registerReadOnlyCommand(pi);
+	registerWorkdirGuardCommand(pi);
 
 	pi.on("tool_call", async (event, ctx) => {
 		const projectConfig = ctx.cwd
