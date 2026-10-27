@@ -157,9 +157,12 @@ Allowed without any opt-out:
 
 - paths inside the working directory, relative or absolute;
 - paths under a system temp directory (`/tmp`, `os.tmpdir()`), so temp files keep working;
-- **reading** the installed skills, under `~/.agents/skills/` and `~/.pi/skills/`.
+- **reading** the installed skills, under `~/.agents/skills/` and `~/.pi/skills/`;
+- glob patterns that expand from a directory inside the working directory (`docs/agent/*.md`, `src/**/*.tsx`).
 
 Blocked: any path resolving outside the workdir — parent traversals (`../..`), absolute paths such as `/etc/passwd`, home-directory shortcuts (`~/file`), unresolvable variables (`$HOME/x`), `cd` out of the boundary, and the temp root itself (`rm -rf /tmp`).
+
+Glob patterns are decided from the directory they expand from, the part of the pattern before the first wildcard. `ls docs/agent/*.md` is allowed because `docs/agent` is inside the workdir; `ls /etc/*.conf` and `ls ../*.txt` are blocked because their expansion directory is outside it. A pattern that walks out of the directory it expands from (`docs/*/../../etc/passwd`) is blocked as well, because the reachable set cannot be bounded statically. The skills and system temp exceptions apply to glob patterns too: reading `~/.agents/skills/*/SKILL.md` is allowed, writing `~/.agents/skills/*` is blocked, and `rm /tmp/*.log` is allowed while `rm -rf /tmp` is not.
 
 Skills are read-only: the agent can load a skill to follow its instructions, but cannot modify one. `write`, `edit`, `apply_patch`, shell redirects and write commands (`tee`, `cp`, `mv`, `install`, `ln`, `truncate`, `dd`, `chmod`, `chown`, `chgrp`) targeting a skills directory are blocked, because skills are instructions pi loads on future runs and writing there would be a persistence channel.
 
@@ -200,6 +203,7 @@ prevent-destructive-commands/
 │       ├── types.ts          # Shared CheckResult type + helpers
 │       ├── args.ts           # Token-scanning helpers (positional args, subcommand matching)
 │       ├── path-utils.ts      # cwd-relative path resolution, temp and skill roots
+│       ├── glob.ts            # Wildcard detection and glob pattern splitting
 │       ├── git.ts             # git reset --hard, push --force, ...
 │       ├── docker.ts          # docker rm, system prune, ...
 │       ├── aws.ts             # aws s3 rm, ec2 terminate-instances, ...
@@ -212,6 +216,7 @@ prevent-destructive-commands/
 │   ├── migration-guard-test.ts
 │   ├── nx-guard-test.ts     # Verifies Nx configuration protection and allowed creation
 │   ├── comment-guard-test.ts # Verifies new-comment blocking across write, edit, patch, bash
+│   ├── glob-guard-test.ts    # Verifies glob patterns inside and outside the workdir
 │   └── e2e-install-test.ts  # End-to-end: verifies real installation/discovery by pi
 ├── tsconfig.json     # TypeScript configuration
 ├── package.json      # Package metadata for pi marketplace
@@ -239,6 +244,7 @@ npm run test:nx-guard
 npm run test:comment-guard
 npm run test:workdir-guard
 npm run test:workdir-guard-command
+npm run test:glob-guard
 ```
 
 Or run a single file directly with tsx or jiti:

@@ -40,7 +40,7 @@ export function checkPathSensitive(
 				`${JSON.stringify(token)} targets the system temp directory root itself — temp files are allowed, the temp root is not`,
 			);
 		}
-		const r = isOutsideCwd(arg, resolveCwd, boundaryCwd);
+		const r = isOutsideCwd(arg, resolveCwd, boundaryCwd, "write");
 		if (r.dangerous) {
 			return block(
 				`${JSON.stringify(token)} targets a path outside the working directory — ${r.reason}`,
