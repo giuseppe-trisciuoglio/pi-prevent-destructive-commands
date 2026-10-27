@@ -65,6 +65,7 @@ the home directory in `src/rules/path-utils.ts`.
 
 Integration points:
 
+- `src/command-analysis.ts`: shared token cursor, heredoc orchestration, nested-command helpers, and command-operand classification.
 - `src/rules/path-utils.ts`: shared system temp, skill root, and null-device helpers.
 - `src/rules/path-sensitive.ts`: rejects the temp root as a deletion target.
 - `src/index.ts`: `checkToolInputWorkdir` runs for non-bash tools;
@@ -78,6 +79,9 @@ Integration points:
   while temp files keep working everywhere in the extension.
 - Shell output and error redirection to `/dev/null` is allowed as a safe sink.
   Direct access to the null device and other paths under `/dev` remain blocked.
+- Command operands are classified before path checks. Read-only slash-delimited
+  `sed` address scripts are not treated as paths, while their input and script
+  files remain inside the boundary.
 - The guard shifts behaviour of the existing destructive checker: `/tmp` targets
   are no longer rejected. Tests that relied on `/tmp` being outside the boundary
   were rewritten to use non-temp paths so they keep asserting what they meant to.

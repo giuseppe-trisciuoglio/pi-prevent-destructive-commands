@@ -59,6 +59,25 @@ case_("cp ./file.txt /dev/null", true, "ordinary writes to the null device remai
 case_("echo output > /dev/stdout", true, "other device paths remain blocked");
 case_("echo output > /etc/passwd", true, "redirects to other outside paths remain blocked");
 
+case_(
+	"sed -n '/ThreadsLista\\|ThreadRiga\\|threads /p' \"Hotello - Conversazioni.dc.html\" | head -5",
+	false,
+	"a slash-delimited sed address is a script, not a path",
+);
+case_(
+	"cd .claude-design && sed -n '/pattern/p' \"Hotello - Conversazioni.dc.html\" | head -5",
+	false,
+	"a sed address script is allowed after changing to a subdirectory",
+);
+case_("sed -n '/pattern/p' src/file.txt", false, "a sed address script is allowed");
+case_("sed -n -e '/pattern/p' src/file.txt", false, "a sed expression script is allowed");
+case_("sed -n '/pattern/p' /etc/passwd", true, "a sed input outside the workdir remains blocked");
+case_("sed -f /etc/script.sed src/file.txt", true, "a sed script file outside the workdir remains blocked");
+case_("sed --file=/etc/script.sed src/file.txt", true, "an attached sed script file path remains blocked");
+case_("sed -n '/pattern/w /etc/passwd' src/file.txt", true, "a sed script that writes outside remains blocked");
+case_("sed --expression='/pattern/w /etc/passwd' src/file.txt", true, "an attached unsafe sed expression remains blocked");
+case_("grep sed '/pattern/p'", true, "sed is only classified as a command at command start");
+
 case_("cat ~/.agents/skills/graphify/SKILL.md", false, "reading an installed skill is allowed");
 case_("cat ~/.pi/skills/custom/SKILL.md", false, "reading a pi skill is allowed");
 case_("ls ~/.agents/skills", false, "listing the skills directory is allowed");
