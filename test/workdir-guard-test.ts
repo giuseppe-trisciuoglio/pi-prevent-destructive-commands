@@ -46,6 +46,19 @@ case_("rm /tmp/temp.log", false, "tmp removal allowed");
 case_("mkdir /tmp/newdir", false, "tmp mkdir allowed");
 case_("rm -rf /tmp", true, "the temp root itself is not a temp file");
 
+case_(
+	"grep -rn \"pattern\" docs/ .pi/ 2>/dev/null | head -30",
+	false,
+	"stderr redirected to the null device",
+);
+case_("echo output > /dev/null", false, "stdout redirected to the null device");
+case_("echo output >> /dev/null", false, "appended stdout redirected to the null device");
+case_("cat /dev/null", true, "direct null device reads remain blocked");
+case_("rm /dev/null", true, "destructive null device access remains blocked");
+case_("cp ./file.txt /dev/null", true, "ordinary writes to the null device remain blocked");
+case_("echo output > /dev/stdout", true, "other device paths remain blocked");
+case_("echo output > /etc/passwd", true, "redirects to other outside paths remain blocked");
+
 case_("cat ~/.agents/skills/graphify/SKILL.md", false, "reading an installed skill is allowed");
 case_("cat ~/.pi/skills/custom/SKILL.md", false, "reading a pi skill is allowed");
 case_("ls ~/.agents/skills", false, "listing the skills directory is allowed");
@@ -84,6 +97,11 @@ checkTool(
 	"write to temp dir",
 	false,
 	checkToolInputWorkdir("write", { path: "/tmp/x.txt" }, () => [], CWD),
+);
+checkTool(
+	"write to null device",
+	true,
+	checkToolInputWorkdir("write", { path: "/dev/null" }, () => [], CWD),
 );
 checkTool(
 	"edit outside cwd",

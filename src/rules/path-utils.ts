@@ -10,7 +10,7 @@ import { SKILL_ROOT_RELATIVE_PATHS } from "../config";
 import { globLeavesPrefix, hasGlobMagic, hasShellVariable, splitGlobPattern } from "./glob";
 import { type CheckResult, SAFE, block } from "./types";
 
-export type PathAccess = "read" | "write";
+export type PathAccess = "read" | "write" | "redirect";
 
 function expandTilde(p: string): string {
 	if (p === "~") return homedir();
@@ -44,6 +44,12 @@ const SYSTEM_TEMP_ROOT_SET: ReadonlySet<string> = new Set(
 );
 
 const SYSTEM_TEMP_ROOTS: readonly string[] = [...SYSTEM_TEMP_ROOT_SET];
+
+const NULL_DEVICE_PATH = "/dev/null";
+
+function isNullDevice(resolvedPath: string): boolean {
+	return resolvedPath === NULL_DEVICE_PATH;
+}
 
 export function isSystemTempPath(resolvedPath: string): boolean {
 	const target = stripTrailingSlashes(resolvedPath);
@@ -108,7 +114,7 @@ function checkGlobBoundary(
 		return SAFE;
 	}
 	if (isSkillPath(resolvedPrefix)) {
-		if (access === "write") {
+		if (access !== "read") {
 			return block(
 				`${JSON.stringify(p)} expands inside an installed skills directory (${resolvedPrefix}) — skills are read-only for the agent`,
 			);
@@ -149,11 +155,14 @@ export function isOutsideCwd(
 	if (resolved === null) {
 		return block(`cannot safely resolve path: ${JSON.stringify(p)}`);
 	}
+	if (access === "redirect" && isNullDevice(resolved)) {
+		return SAFE;
+	}
 	if (isSystemTempPath(resolved)) {
 		return SAFE;
 	}
 	if (isSkillPath(resolved)) {
-		if (access === "write") {
+		if (access !== "read") {
 			return block(
 				`${JSON.stringify(p)} is inside an installed skills directory (${resolved}) — skills are read-only for the agent`,
 			);

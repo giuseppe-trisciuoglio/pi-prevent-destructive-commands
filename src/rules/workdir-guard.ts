@@ -76,14 +76,14 @@ export function checkPathInsideWorkdir(
 		);
 	}
 	if (isSkillPath(resolved)) {
-		if (access === "write") {
+		if (access !== "read") {
 			return block(
 				`${JSON.stringify(p)} is inside an installed skills directory (${resolved}) — skills are read-only for the agent`,
 			);
 		}
 		return SAFE;
 	}
-	return isOutsideCwd(p, resolveCwd, boundaryCwd);
+	return isOutsideCwd(p, resolveCwd, boundaryCwd, access);
 }
 
 function addPositionals(
@@ -103,20 +103,27 @@ function addPositionals(
 	if (mode === "last" && last >= 0) indices.add(last);
 }
 
-function collectWriteTargetIndices(tokens: string[]): Set<number> {
-	const indices = new Set<number>();
+function collectWriteTargetIndices(tokens: string[]): {
+	writeTargets: Set<number>;
+	redirectTargets: Set<number>;
+} {
+	const writeTargets = new Set<number>();
+	const redirectTargets = new Set<number>();
 
 	for (let i = 0; i < tokens.length; i++) {
 		const token = tokens[i]!;
 
 		if (WRITE_REDIRECT_OPERATORS.has(token)) {
 			const next = tokens[i + 1];
-			if (next && !SHELL_OPERATORS.has(next)) indices.add(i + 1);
+			if (next && !SHELL_OPERATORS.has(next)) {
+				writeTargets.add(i + 1);
+				redirectTargets.add(i + 1);
+			}
 			continue;
 		}
 
 		if (PATH_SENSITIVE_COMMANDS.has(token)) {
-			addPositionals(tokens, i + 1, indices, "all");
+			addPositionals(tokens, i + 1, writeTargets, "all");
 			continue;
 		}
 
@@ -124,23 +131,23 @@ function collectWriteTargetIndices(tokens: string[]): Set<number> {
 			for (let j = i + 1; j < tokens.length; j++) {
 				const arg = tokens[j]!;
 				if (SHELL_OPERATORS.has(arg)) break;
-				if (arg.startsWith("of=")) indices.add(j);
+				if (arg.startsWith("of=")) writeTargets.add(j);
 			}
 			continue;
 		}
 
 		if (WRITE_TARGET_ALL_ARGS_COMMANDS.has(token)) {
-			addPositionals(tokens, i + 1, indices, "all");
+			addPositionals(tokens, i + 1, writeTargets, "all");
 			continue;
 		}
 
 		if (WRITE_TARGET_LAST_ARG_COMMANDS.has(token)) {
-			addPositionals(tokens, i + 1, indices, "last");
+			addPositionals(tokens, i + 1, writeTargets, "last");
 			continue;
 		}
 	}
 
-	return indices;
+	return { writeTargets, redirectTargets };
 }
 
 function checkCommandTokens(
@@ -155,7 +162,7 @@ function checkCommandTokens(
 		);
 	}
 
-	const writeTargets = collectWriteTargetIndices(tokens);
+	const { writeTargets, redirectTargets } = collectWriteTargetIndices(tokens);
 	const cwdStack: string[] = [];
 	let currentCwd = cwd;
 
@@ -261,7 +268,11 @@ function checkCommandTokens(
 		}
 
 		if (looksLikePath(token)) {
-			const access: WorkdirAccess = writeTargets.has(i) ? "write" : "read";
+			const access: WorkdirAccess = redirectTargets.has(i)
+				? "redirect"
+				: writeTargets.has(i)
+					? "write"
+					: "read";
 			const r = checkPathInsideWorkdir(token, currentCwd, boundaryCwd, access);
 			if (r.dangerous) return r;
 			i++;

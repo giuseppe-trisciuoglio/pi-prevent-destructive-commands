@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The workdir boundary guard now allows shell output and error redirection to `/dev/null`, so common commands such as `grep -rn "pattern" docs/ .pi/ 2>/dev/null | head -30` are no longer blocked. The exception is limited to redirect destinations: direct reads, ordinary writes, file-tool writes, destructive commands, and other paths under `/dev` remain blocked. Adds regression coverage in `test/workdir-guard-test.ts`.
 - Glob patterns are no longer refused as unresolvable paths. The workdir boundary guard decides a pattern from the directory it expands from — the part before the first wildcard — so `ls docs/agent/*.md`, `grep -rn "x" frontend/src/pages/*.tsx` and `rm dist/*.log` work again, while `ls /etc/*.conf`, `ls ../*.txt` and `rm docs/*/../../etc/passwd` stay blocked. Shell variables (`$HOME/x`) and the `find -exec` placeholder (`{}`) are still refused, and the skills and system temp exceptions apply to patterns as well: reading `~/.agents/skills/*/SKILL.md` is allowed, writing `~/.agents/skills/*` is blocked, and `rm /tmp/*.log` is allowed while `rm -rf /tmp` is not. Adds `src/rules/glob.ts`, `test/glob-guard-test.ts` (`npm run test:glob-guard`) and `docs/adr/0003-glob-patterns.md`.
 
 ## [1.2.0] - 2026-09-28
