@@ -46,6 +46,18 @@ case_("rm /tmp/temp.log", false, "tmp removal allowed");
 case_("mkdir /tmp/newdir", false, "tmp mkdir allowed");
 case_("rm -rf /tmp", true, "the temp root itself is not a temp file");
 
+case_("cat ~/.agents/skills/graphify/SKILL.md", false, "reading an installed skill is allowed");
+case_("cat ~/.pi/skills/custom/SKILL.md", false, "reading a pi skill is allowed");
+case_("ls ~/.agents/skills", false, "listing the skills directory is allowed");
+case_("echo x > ~/.agents/skills/graphify/SKILL.md", true, "writing a skill is blocked");
+case_("tee ~/.pi/skills/custom/SKILL.md", true, "teeing a skill is blocked");
+case_("cp /tmp/x ~/.agents/skills/x.md", true, "copying into a skill directory is blocked");
+case_("cp ~/.agents/skills/x.md /tmp/", false, "copying a skill out is allowed");
+case_("chmod +x ~/.agents/skills/x.md", true, "changing skill permissions is blocked");
+case_("rm -rf ~/.agents/skills", true, "removing a skill directory is blocked");
+case_("rm ~/.agents/skills/x.md", true, "removing a skill is blocked");
+case_("bash -c \"cat /etc/passwd\"", true, "nested shell command is analyzed");
+case_("eval \"cat /etc/passwd\"", true, "quoted command line is analyzed");
 case_("echo hello", false, "no path");
 case_("git status", false, "no path");
 case_("npm install", false, "no path");
@@ -92,6 +104,31 @@ checkTool(
 	"read inside cwd",
 	false,
 	checkToolInputWorkdir("read", {}, () => [], CWD, ["src/index.ts"]),
+);
+checkTool(
+	"read a skill file",
+	false,
+	checkToolInputWorkdir("read", {}, () => [], CWD, ["~/.agents/skills/graphify/SKILL.md"]),
+);
+checkTool(
+	"read a pi skill file",
+	false,
+	checkToolInputWorkdir("read", {}, () => [], CWD, ["~/.pi/skills/custom/SKILL.md"]),
+);
+checkTool(
+	"write a skill file",
+	true,
+	checkToolInputWorkdir("write", { path: "~/.agents/skills/graphify/SKILL.md" }, () => [], CWD),
+);
+checkTool(
+	"edit a skill file",
+	true,
+	checkToolInputWorkdir("edit", { path: "~/.pi/skills/custom/SKILL.md" }, () => [], CWD),
+);
+checkTool(
+	"apply_patch a skill file",
+	true,
+	checkToolInputWorkdir("apply_patch", { input: "patch" }, () => ["~/.agents/skills/x.md"], CWD),
 );
 
 if (checkPathInsideWorkdir("src/file.ts", CWD, CWD).dangerous) {

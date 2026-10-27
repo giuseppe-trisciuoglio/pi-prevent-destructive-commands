@@ -6,6 +6,7 @@
 import { realpathSync } from "node:fs";
 import { isAbsolute, normalize, resolve } from "node:path";
 import { homedir, tmpdir } from "node:os";
+import { SKILL_ROOT_RELATIVE_PATHS } from "../config";
 import { type CheckResult, SAFE, block } from "./types";
 
 function expandTilde(p: string): string {
@@ -53,6 +54,20 @@ export function isSystemTempPath(resolvedPath: string): boolean {
 
 export function isSystemTempRoot(resolvedPath: string): boolean {
 	return SYSTEM_TEMP_ROOT_SET.has(stripTrailingSlashes(resolvedPath));
+}
+
+const SKILL_ROOT_SET: ReadonlySet<string> = new Set(
+	SKILL_ROOT_RELATIVE_PATHS.flatMap((p) => {
+		const expanded = stripTrailingSlashes(expandTilde(p));
+		return [expanded, canonicalDir(expanded)];
+	}),
+);
+
+const SKILL_ROOTS: readonly string[] = [...SKILL_ROOT_SET];
+
+export function isSkillPath(resolvedPath: string): boolean {
+	const target = stripTrailingSlashes(resolvedPath);
+	return SKILL_ROOTS.some((root) => target === root || target.startsWith(`${root}/`));
 }
 
 /**

@@ -386,6 +386,17 @@ export const WRITE_COMMANDS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Directory delle skill installate, fuori dalla workdir di qualsiasi progetto.
+ * L'agente deve poterle leggere (le skill sono istruzioni che pi carica a
+ * runtime), ma non scriverci: sono un canale di persistenza. I path sono
+ * relativi alla home dell'utente e vengono risolti in `rules/path-utils.ts`.
+ */
+export const SKILL_ROOT_RELATIVE_PATHS: readonly string[] = [
+	"~/.agents/skills",
+	"~/.pi/skills",
+];
+
+/**
  * Operatori di redirect che scrivono su file: il token immediatamente
  * successivo è il path di destinazione e va protetto.
  */
