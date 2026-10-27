@@ -132,21 +132,33 @@ export default function (pi: ExtensionAPI) {
 			}
 		}
 
-		if (!projectConfig.disableWorkdirGuard && !isToolCallEventType("bash", event)) {
+		if (!projectConfig.disableWorkdirGuard) {
 			const input = event.input as Record<string, unknown>;
-			const extraPaths: string[] = [];
-			if (typeof input.path === "string") {
-				extraPaths.push(input.path);
-			}
-			const workdirBlock = checkToolInputWorkdir(
-				event.toolName,
-				input,
-				pathsFromPatch,
-				ctx.cwd,
-				extraPaths,
-			);
-			if (workdirBlock.dangerous) {
-				return { block: true, reason: `[prevent-destructive-commands] Blocked: ${workdirBlock.reason}` };
+			const isShellTool = event.toolName === "bash" || event.toolName === "powershell";
+
+			if (isShellTool) {
+				const command = input.command;
+				if (typeof command === "string" && command.length > 0) {
+					const workdirBlock = checkCommandWorkdir(command, ctx.cwd);
+					if (workdirBlock.dangerous) {
+						return { block: true, reason: `[prevent-destructive-commands] Blocked: ${workdirBlock.reason}` };
+					}
+				}
+			} else {
+				const extraPaths: string[] = [];
+				if (typeof input.path === "string") {
+					extraPaths.push(input.path);
+				}
+				const workdirBlock = checkToolInputWorkdir(
+					event.toolName,
+					input,
+					pathsFromPatch,
+					ctx.cwd,
+					extraPaths,
+				);
+				if (workdirBlock.dangerous) {
+					return { block: true, reason: `[prevent-destructive-commands] Blocked: ${workdirBlock.reason}` };
+				}
 			}
 		}
 
@@ -162,13 +174,6 @@ export default function (pi: ExtensionAPI) {
 			gitGuardsEnabled,
 		});
 		if (!dangerous) return undefined;
-
-		if (!projectConfig.disableWorkdirGuard) {
-			const workdirBlock = checkCommandWorkdir(command, ctx.cwd);
-			if (workdirBlock.dangerous) {
-				return { block: true, reason: `[prevent-destructive-commands] Blocked: ${workdirBlock.reason}` };
-			}
-		}
 
 		return {
 			block: true,

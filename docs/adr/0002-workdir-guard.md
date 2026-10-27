@@ -4,6 +4,7 @@
 - Date: 2026-10-26
 - Author: Giuseppe Trisciuoglio
 - Issue: [#24](https://github.com/giuseppe-trisciuoglio/pi-prevent-destructive-commands/issues/24)
+- Follow-up: [#26](https://github.com/giuseppe-trisciuoglio/pi-prevent-destructive-commands/issues/26) (skills whitelist)
 
 ## Context
 
@@ -47,9 +48,20 @@ The guard is configurable per project via `.pi/prevent-destructive-commands.json
 using the `disableWorkdirGuard` boolean, defaulting to `false` (guard active),
 and toggled from the pi TUI with `/workdir-guard [on|off|status]`.
 
+Installed skills live outside every project workdir, so the guard would make
+them unreadable. The two skill roots, `~/.agents/skills` and `~/.pi/skills`,
+are therefore whitelisted **for reading only**. Writing to them stays blocked:
+skills are instructions pi loads on future runs, so writing there would turn
+the whitelist into a persistence channel. The write side is enforced for the
+file tools (`write`, `edit`, `apply_patch`) and for shell write vectors
+(redirect operators plus `tee`, `cp`, `mv`, `install`, `ln`, `truncate`, `dd`,
+`chmod`, `chown`, `chgrp` and the path-sensitive commands). The roots are
+declared in `src/config.ts` (`SKILL_ROOT_RELATIVE_PATHS`) and resolved against
+the home directory in `src/rules/path-utils.ts`.
+
 Integration points:
 
-- `src/rules/path-utils.ts`: shared system temp helpers.
+- `src/rules/path-utils.ts`: shared system temp and skill root helpers.
 - `src/rules/path-sensitive.ts`: rejects the temp root as a deletion target.
 - `src/index.ts`: `checkToolInputWorkdir` runs for non-bash tools;
   `checkCommandWorkdir` runs for bash commands.
@@ -63,6 +75,9 @@ Integration points:
 - The guard shifts behaviour of the existing destructive checker: `/tmp` targets
   are no longer rejected. Tests that relied on `/tmp` being outside the boundary
   were rewritten to use non-temp paths so they keep asserting what they meant to.
+- Bash analysis now distinguishes read from write targets, so a skill can be
+  read but not modified. A skill path that cannot be classified (unknown tool,
+  unrecognised write command) is treated as a write and blocked.
 - Paths with variables or globs cannot be resolved statically and are blocked,
   which is conservative but predictable.
 - The guard is opt-out per project through the JSON file or `/workdir-guard off`.

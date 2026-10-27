@@ -20,7 +20,7 @@ A faithful port of Claude's [`prevent-destructive-commands.py`](https://github.c
 - **Nx configuration guard** — In Nx workspaces, existing `package.json` and TypeScript configuration files are immutable to the agent; missing ones can still be created.
 - **Source comment guard** — The agent cannot introduce new comments into source files (Java, TypeScript, Dart, Python, SQL, HTML, and more) through writing tools or bash write vectors; existing comments may be carried over untouched and tooling directives (`@ts-ignore`, `eslint-disable`, …) stay allowed.
 - **Read-only mode** — `/read-only on` turns the project into an inspection-only workspace: `write`, `edit`, patch tools, `bash`, and `powershell` are blocked while `read`, `grep`, `find`, and `ls` keep working.
-- **Workdir boundary guard** — Every file read, write, edit, and delete is confined to the working directory where pi runs. System temp directories (`/tmp`, `os.tmpdir()`) are the only exception; the temp root itself stays protected.
+- **Workdir boundary guard** — Every file read, write, edit, and delete is confined to the working directory where pi runs. System temp directories (`/tmp`, `os.tmpdir()`) are the only exception; the temp root itself stays protected. Installed skills (`~/.agents/skills/`, `~/.pi/skills/`) stay readable but are never written.
 - **Configurable** — Tune protection levels via simple flags in `src/config.ts`.
 - **Zero dependencies** — Lightweight, fast, and self-contained.
 - **Extensive test suite** — Smoke tests plus guard-specific and slash-command tests validate every blocking rule.
@@ -40,6 +40,7 @@ All rules are defined in [`src/config.ts`](src/config.ts) and can be customized.
 | **Destructive GitHub CLI** | `gh api -X DELETE` / `gh api --method DELETE`, `gh repo delete` / `rename`, `gh release delete`, `gh gist delete`, `gh secret delete`, `gh variable delete`, `gh label delete`, `gh workflow disable`, `gh run delete` |
 | **Destructive AWS CLI** | `aws s3 rm`, `aws ec2 terminate-instances`, `aws rds delete-db-instance`, `aws cloudformation delete-stack`, and 50+ more subcommands (full list in `src/config.ts`) |
 | **Paths outside the workdir** | Any tool or bash command touching a path that resolves outside the working directory: `cat /etc/passwd`, `cp ~/.ssh/id_rsa ./`, `write`/`edit` to `../outside.ts`, `apply_patch` creating files outside cwd, `cd /etc && cat passwd`. Paths under a system temp directory (`/tmp`, `os.tmpdir()`) are allowed; the temp root itself is not *(see the per-project opt-out below)* |
+| **Writes to skills** | Writing to an installed skill under `~/.agents/skills/` or `~/.pi/skills/`: `write`/`edit`/`apply_patch`, `echo x > SKILL.md`, `tee`, `cp`, `mv`, `chmod`. Reading those skills is allowed. |
 | **Sensitive file reads** | `cat`, `grep`, etc. on `.env`, SSH keys, `.pem` files — **disabled by default** via `ENABLE_SENSITIVE_FILE_CHECK` *(see Configuration)* |
 | **Existing Nx configuration** | `package.json`, `tsconfig.json`, `tsconfig.base.json`, `tsconfig.lib.json`, and `tsconfig.spec.json` anywhere below a workspace containing `nx.json`. Creating a missing file is allowed; changing or deleting an existing file is blocked. |
 | **New comments in source files** | Any tool call that introduces a **new** comment into a source file: `write`/`edit`/`apply_patch` touching Java, TypeScript/JavaScript, Dart, Go, Rust, C/C++, C#, Swift, Kotlin, Scala, PHP, CSS/SCSS, Python, Ruby, shell, YAML, TOML, Terraform, GraphQL, SQL, Lua, Haskell, Elm, HTML/XML/SVG/Markdown files, plus bash write vectors (`cat > a.ts <<EOF`, `tee b.py <<EOF`, `echo "// x" >> c.ts`). Comments already in the file may be carried over; shebang lines, tooling directives (`@ts-ignore`, `eslint-disable`, `biome-ignore`, `noqa`, …) and purely decorative lines are exempt *(see the per-project opt-out below)* |
@@ -155,9 +156,12 @@ The workdir boundary guard keeps every filesystem operation inside the working d
 Allowed without any opt-out:
 
 - paths inside the working directory, relative or absolute;
-- paths under a system temp directory (`/tmp`, `os.tmpdir()`), so temp files keep working.
+- paths under a system temp directory (`/tmp`, `os.tmpdir()`), so temp files keep working;
+- **reading** the installed skills, under `~/.agents/skills/` and `~/.pi/skills/`.
 
 Blocked: any path resolving outside the workdir — parent traversals (`../..`), absolute paths such as `/etc/passwd`, home-directory shortcuts (`~/file`), unresolvable variables (`$HOME/x`), `cd` out of the boundary, and the temp root itself (`rm -rf /tmp`).
+
+Skills are read-only: the agent can load a skill to follow its instructions, but cannot modify one. `write`, `edit`, `apply_patch`, shell redirects and write commands (`tee`, `cp`, `mv`, `install`, `ln`, `truncate`, `dd`, `chmod`, `chown`, `chgrp`) targeting a skills directory are blocked, because skills are instructions pi loads on future runs and writing there would be a persistence channel.
 
 | Command | Effect |
 |---------|--------|
@@ -195,7 +199,7 @@ prevent-destructive-commands/
 │   └── rules/            # Per-category destructive-command handlers
 │       ├── types.ts          # Shared CheckResult type + helpers
 │       ├── args.ts           # Token-scanning helpers (positional args, subcommand matching)
-│       ├── path-utils.ts      # cwd-relative path resolution
+│       ├── path-utils.ts      # cwd-relative path resolution, temp and skill roots
 │       ├── git.ts             # git reset --hard, push --force, ...
 │       ├── docker.ts          # docker rm, system prune, ...
 │       ├── aws.ts             # aws s3 rm, ec2 terminate-instances, ...
