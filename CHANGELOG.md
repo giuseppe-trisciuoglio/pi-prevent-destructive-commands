@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Extracted shared helpers to remove all code clones reported by jscpd (≥ 50 tokens): `src/rules/args.ts` (positional-argument scanning and longest-subcommand matching for the checker and the aws/gh/file-reading rules), `src/patch-paths.ts` (patch/file-path extraction shared by the extension entry point and the Nx guard), `src/token-segments.ts` (command-chain segmentation for the bash-level guards), and `test/helpers.ts` (shared test utilities: `check`, `makeProject`, `isBlocked`, `runCheckCases`, `runIsolatedTest`). No behavior change.
 
+### Fixed
+
+- Glob patterns are no longer refused as unresolvable paths. The workdir boundary guard decides a pattern from the directory it expands from — the part before the first wildcard — so `ls docs/agent/*.md`, `grep -rn "x" frontend/src/pages/*.tsx` and `rm dist/*.log` work again, while `ls /etc/*.conf`, `ls ../*.txt` and `rm docs/*/../../etc/passwd` stay blocked. Shell variables (`$HOME/x`) and the `find -exec` placeholder (`{}`) are still refused, and the skills and system temp exceptions apply to patterns as well: reading `~/.agents/skills/*/SKILL.md` is allowed, writing `~/.agents/skills/*` is blocked, and `rm /tmp/*.log` is allowed while `rm -rf /tmp` is not. Adds `src/rules/glob.ts`, `test/glob-guard-test.ts` (`npm run test:glob-guard`) and `docs/adr/0003-glob-patterns.md`.
+
 ## [1.2.0] - 2026-09-28
 
 ### Added

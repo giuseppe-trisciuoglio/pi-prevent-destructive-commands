@@ -23,8 +23,11 @@ async function main(): Promise<void> {
 		assert.equal(checkTokens(["find", outside], root).dangerous, true);
 		assert.equal(checkTokens(["find", join(outside, "x")], root).dangerous, true);
 
-		// Unsafe: unresolvable glob as the start path.
-		assert.equal(checkTokens(["find", "/tmp/*"], root).dangerous, true);
+		assert.equal(checkTokens(["find", "/tmp/*"], root).dangerous, false);
+		assert.equal(checkTokens(["find", join(root, "src", "*")], root).dangerous, false);
+		assert.equal(checkTokens(["find", "/etc/*"], root).dangerous, true);
+		assert.equal(checkTokens(["find", join(outside, "*")], root).dangerous, true);
+		assert.equal(checkTokens(["find", "../*"], root).dangerous, true);
 
 		// Unsafe: a preceding unresolved `cd` makes relative start paths unverifiable.
 		assert.equal(checkTokens(["cd", "-", ";", "find", "."], root).dangerous, true);

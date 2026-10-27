@@ -11,10 +11,11 @@ import {
 import { extractHeredocs } from "../heredoc";
 import { tokenize } from "../tokenizer";
 import { forEachPositionalArg } from "./args";
-import { isOutsideCwd, isSkillPath, isSystemTempRoot, resolvePath } from "./path-utils";
+import { hasGlobMagic, hasShellVariable } from "./glob";
+import { isOutsideCwd, isSkillPath, isSystemTempRoot, type PathAccess, resolvePath } from "./path-utils";
 import { type CheckResult, SAFE, block } from "./types";
 
-export type WorkdirAccess = "read" | "write";
+export type WorkdirAccess = PathAccess;
 
 const READ_ONLY_TOOL_NAMES: ReadonlySet<string> = new Set(["read", "grep", "find", "ls"]);
 
@@ -57,6 +58,14 @@ export function checkPathInsideWorkdir(
 	boundaryCwd: string,
 	access: WorkdirAccess = "read",
 ): CheckResult {
+	if (hasShellVariable(p)) {
+		return block(
+			`path contains a variable that cannot be resolved statically: ${JSON.stringify(p)}`,
+		);
+	}
+	if (hasGlobMagic(p)) {
+		return isOutsideCwd(p, resolveCwd, boundaryCwd, access);
+	}
 	const resolved = resolvePath(p, resolveCwd);
 	if (resolved === null) {
 		return block(`cannot safely resolve path: ${JSON.stringify(p)}`);
