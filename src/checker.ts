@@ -8,13 +8,16 @@
  * The per-category rule handlers live in `./rules/`.
  */
 
-import { tokenize } from "./tokenizer";
-import { forEachPositionalArg } from "./rules/args";
+import {
+	analyzeHeredocCommand,
+	checkQuotedCommandWrapper,
+	createCommandTokenCursor,
+	shellCommandScript,
+} from "./command-analysis";
 import {
 	DELEGATION_COMMANDS,
 	FILE_READING_COMMANDS,
 	FIND_EXEC_FLAGS,
-	HEREDOC_EXECUTOR_COMMANDS,
 	MAX_NESTING_DEPTH,
 	PATH_SENSITIVE_COMMANDS,
 	QUOTED_COMMAND_WRAPPERS,
@@ -22,7 +25,6 @@ import {
 	SHELL_OPERATORS,
 	WRAPPER_COMMANDS,
 } from "./config";
-import { extractHeredocs } from "./heredoc";
 import { checkAws } from "./rules/aws";
 import { checkDocker } from "./rules/docker";
 import { checkFileReading } from "./rules/file-reading";
@@ -66,23 +68,11 @@ export function checkCommand(
 		);
 	}
 
-	const extraction = extractHeredocs(command);
-	if (extraction === null) {
-		return checkTokens(tokenize(command), cwd, depth, false, boundaryCwd, options);
-	}
-
-	const lineTokens = tokenize(extraction.text);
-	const result = checkTokens(lineTokens, cwd, depth, false, boundaryCwd, options);
-	if (result.dangerous) return result;
-
-	if (extraction.bodies.length > 0 && lineTokens.some((t) => HEREDOC_EXECUTOR_COMMANDS.has(t))) {
-		for (const body of extraction.bodies) {
-			const r = checkCommand(body, cwd, depth + 1, boundaryCwd, options);
-			if (r.dangerous) return r;
-		}
-	}
-
-	return SAFE;
+	return analyzeHeredocCommand(
+		command,
+		(tokens) => checkTokens(tokens, cwd, depth, false, boundaryCwd, options),
+		(body) => checkCommand(body, cwd, depth + 1, boundaryCwd, options),
+	);
 }
 
 /**
@@ -115,37 +105,9 @@ export function checkTokens(
 		);
 	}
 
-	// Tracks the effective working directory as `cd` is encountered in this same
-	// command chain (e.g. `cd /; rm etc/passwd`). `null` means a preceding `cd`
-	// target could not be statically resolved, so the effective cwd is unknown.
-	let currentCwd: string | null = cwd;
-	const cwdStack: (string | null)[] = [];
+	const cursor = createCommandTokenCursor<string | null>(tokens, cwd);
 
-	let i = 0;
-	while (i < tokens.length) {
-		const token = tokens[i];
-
-		if (!token) {
-			i++;
-			continue;
-		}
-
-		// `(` / `)` scope a subshell: a `cd` inside it doesn't leak back out.
-		if (token === "(") {
-			cwdStack.push(currentCwd);
-			i++;
-			continue;
-		}
-		if (token === ")") {
-			currentCwd = cwdStack.length > 0 ? (cwdStack.pop() ?? cwd) : cwd;
-			i++;
-			continue;
-		}
-
-		if (SHELL_OPERATORS.has(token)) {
-			i++;
-			continue;
-		}
+	for (const { token, index: i, currentCwd } of cursor) {
 
 		// `cd`: updates the effective cwd used to resolve relative paths for
 		// path-sensitive commands later in this same chain.
@@ -165,57 +127,48 @@ export function checkTokens(
 				j++;
 				break;
 			}
+			let nextCwd = currentCwd;
 			if (currentCwd === null) {
 				// Already unknown — stays unknown.
 			} else if (!found) {
-				currentCwd = resolvePath("~", currentCwd);
+				nextCwd = resolvePath("~", currentCwd);
 			} else if (target === "-") {
 				// `cd -` (previous directory): not statically knowable.
-				currentCwd = null;
+				nextCwd = null;
 			} else if (target !== null) {
-				currentCwd = resolvePath(target, currentCwd);
+				nextCwd = resolvePath(target, currentCwd);
 			}
-			i = j;
+			cursor.setCurrentCwd(nextCwd);
+			cursor.skipTo(j);
 			continue;
 		}
 
 		// Wrapper commands: sudo rm, env -i rm, timeout 10 rm, …
 		if (WRAPPER_COMMANDS.has(token)) {
-			i++;
 			continue;
 		}
 
 		// Quoted-command wrappers: the first positional argument is a command
 		if (QUOTED_COMMAND_WRAPPERS.has(token)) {
-			let dangerous: CheckResult | undefined;
-			forEachPositionalArg(tokens, i, (arg) => {
-				const r = checkCommand(arg, currentCwd ?? cwd, depth + 1, boundaryCwd, options);
-				if (r.dangerous) {
-					dangerous = r;
-					return false;
-				}
-			});
-			if (dangerous) return dangerous;
-			i++;
+			const result = checkQuotedCommandWrapper(
+				tokens,
+				i,
+				currentCwd ?? cwd,
+				depth,
+				(command, nestedCwd, nestedDepth) =>
+					checkCommand(command, nestedCwd, nestedDepth, boundaryCwd, options),
+			);
+			if (result.dangerous) return result;
 			continue;
 		}
 
 		// Shell invocations: bash -c "..."
 		if (SHELL_COMMANDS.has(token)) {
-			let j = i + 1;
-			while (j < tokens.length) {
-				if (tokens[j] === "-c" && j + 1 < tokens.length) {
-				const r = checkCommand(tokens[j + 1], currentCwd ?? cwd, depth + 1, boundaryCwd, options);
-					if (r.dangerous) return r;
-					break;
-				}
-				if (tokens[j].startsWith("-")) {
-					j++;
-				} else {
-					break;
-				}
+			const script = shellCommandScript(tokens, i);
+			if (script !== undefined) {
+				const result = checkCommand(script, currentCwd ?? cwd, depth + 1, boundaryCwd, options);
+				if (result.dangerous) return result;
 			}
-			i++;
 			continue;
 		}
 
@@ -261,7 +214,6 @@ export function checkTokens(
 				}
 				j++;
 			}
-			i++;
 			continue;
 		}
 
@@ -279,42 +231,36 @@ export function checkTokens(
 				);
 				if (r.dangerous) return r;
 			}
-			i++;
 			continue;
 		}
 
 		if (token === "aws") {
 			const r = checkAws(tokens, i);
 			if (r.dangerous) return r;
-			i++;
 			continue;
 		}
 
 		if (token === "docker") {
 			const r = checkDocker(tokens, i);
 			if (r.dangerous) return r;
-			i++;
 			continue;
 		}
 
 		if (token === "gh") {
 			const r = checkGh(tokens, i);
 			if (r.dangerous) return r;
-			i++;
 			continue;
 		}
 
 		if (token === "git") {
 			const r = checkGit(tokens, i, options.gitGuardsEnabled);
 			if (r.dangerous) return r;
-			i++;
 			continue;
 		}
 
 		if (FILE_READING_COMMANDS.has(token)) {
 			const r = checkFileReading(tokens, i);
 			if (r.dangerous) return r;
-			i++;
 			continue;
 		}
 
@@ -326,11 +272,8 @@ export function checkTokens(
 			}
 			const r = checkPathSensitive(tokens, i, token, currentCwd, boundaryCwd, stdinArgs);
 			if (r.dangerous) return r;
-			i++;
 			continue;
 		}
-
-		i++;
 	}
 
 	return SAFE;

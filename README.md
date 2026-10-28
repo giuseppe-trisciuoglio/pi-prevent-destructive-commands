@@ -20,7 +20,7 @@ A faithful port of Claude's [`prevent-destructive-commands.py`](https://github.c
 - **Nx configuration guard** — In Nx workspaces, existing `package.json` and TypeScript configuration files are immutable to the agent; missing ones can still be created.
 - **Source comment guard** — The agent cannot introduce new comments into source files (Java, TypeScript, Dart, Python, SQL, HTML, and more) through writing tools or bash write vectors; existing comments may be carried over untouched and tooling directives (`@ts-ignore`, `eslint-disable`, …) stay allowed.
 - **Read-only mode** — `/read-only on` turns the project into an inspection-only workspace: `write`, `edit`, patch tools, `bash`, and `powershell` are blocked while `read`, `grep`, `find`, and `ls` keep working.
-- **Workdir boundary guard** — Every file read, write, edit, and delete is confined to the working directory where pi runs. System temp directories (`/tmp`, `os.tmpdir()`) are the only exception; the temp root itself stays protected. Installed skills (`~/.agents/skills/`, `~/.pi/skills/`) stay readable but are never written.
+- **Workdir boundary guard** — Every file read, write, edit, and delete is confined to the working directory where pi runs. System temp directories (`/tmp`, `os.tmpdir()`) are allowed, and shell output can be discarded through `/dev/null`; the temp root itself stays protected. Installed skills (`~/.agents/skills/`, `~/.pi/skills/`) stay readable but are never written.
 - **Configurable** — Tune protection levels via simple flags in `src/config.ts`.
 - **Zero dependencies** — Lightweight, fast, and self-contained.
 - **Extensive test suite** — Smoke tests plus guard-specific and slash-command tests validate every blocking rule.
@@ -39,7 +39,7 @@ All rules are defined in [`src/config.ts`](src/config.ts) and can be customized.
 | **Destructive Docker** | `docker rm` / `rmi`, `docker container/image/volume/network rm`, `docker * prune`, `docker compose down -v`, `docker compose rm`, `docker context rm`, `docker swarm leave --force` |
 | **Destructive GitHub CLI** | `gh api -X DELETE` / `gh api --method DELETE`, `gh repo delete` / `rename`, `gh release delete`, `gh gist delete`, `gh secret delete`, `gh variable delete`, `gh label delete`, `gh workflow disable`, `gh run delete` |
 | **Destructive AWS CLI** | `aws s3 rm`, `aws ec2 terminate-instances`, `aws rds delete-db-instance`, `aws cloudformation delete-stack`, and 50+ more subcommands (full list in `src/config.ts`) |
-| **Paths outside the workdir** | Any tool or bash command touching a path that resolves outside the working directory: `cat /etc/passwd`, `cp ~/.ssh/id_rsa ./`, `write`/`edit` to `../outside.ts`, `apply_patch` creating files outside cwd, `cd /etc && cat passwd`. Paths under a system temp directory (`/tmp`, `os.tmpdir()`) are allowed; the temp root itself is not *(see the per-project opt-out below)* |
+| **Paths outside the workdir** | Any tool or bash command touching a path that resolves outside the working directory: `cat /etc/passwd`, `cp ~/.ssh/id_rsa ./`, `write`/`edit` to `../outside.ts`, `apply_patch` creating files outside cwd, `cd /etc && cat passwd`. Paths under a system temp directory (`/tmp`, `os.tmpdir()`) are allowed; the temp root itself is not. Shell redirection to `/dev/null` is allowed, while direct access to it and other paths under `/dev` remain blocked *(see the per-project opt-out below)* |
 | **Writes to skills** | Writing to an installed skill under `~/.agents/skills/` or `~/.pi/skills/`: `write`/`edit`/`apply_patch`, `echo x > SKILL.md`, `tee`, `cp`, `mv`, `chmod`. Reading those skills is allowed. |
 | **Sensitive file reads** | `cat`, `grep`, etc. on `.env`, SSH keys, `.pem` files — **disabled by default** via `ENABLE_SENSITIVE_FILE_CHECK` *(see Configuration)* |
 | **Existing Nx configuration** | `package.json`, `tsconfig.json`, `tsconfig.base.json`, `tsconfig.lib.json`, and `tsconfig.spec.json` anywhere below a workspace containing `nx.json`. Creating a missing file is allowed; changing or deleting an existing file is blocked. |
@@ -157,10 +157,13 @@ Allowed without any opt-out:
 
 - paths inside the working directory, relative or absolute;
 - paths under a system temp directory (`/tmp`, `os.tmpdir()`), so temp files keep working;
+- shell output and error redirection to the Unix null device (`2>/dev/null`, `>/dev/null`);
 - **reading** the installed skills, under `~/.agents/skills/` and `~/.pi/skills/`;
 - glob patterns that expand from a directory inside the working directory (`docs/agent/*.md`, `src/**/*.tsx`).
 
-Blocked: any path resolving outside the workdir — parent traversals (`../..`), absolute paths such as `/etc/passwd`, home-directory shortcuts (`~/file`), unresolvable variables (`$HOME/x`), `cd` out of the boundary, and the temp root itself (`rm -rf /tmp`).
+Blocked: any path resolving outside the workdir — parent traversals (`../..`), absolute paths such as `/etc/passwd`, home-directory shortcuts (`~/file`), unresolvable variables (`$HOME/x`), `cd` out of the boundary, and the temp root itself (`rm -rf /tmp`). The null device is only allowed as a shell redirect destination: direct reads, ordinary writes, file-tool writes, destructive commands, and other paths under `/dev` remain blocked.
+
+Command-specific operands are classified before paths are checked. A read-only, slash-delimited `sed` address such as `sed -n '/pattern/p' input.html` is a script, not a filesystem path. `sed` input files and script files supplied with `-f` or `--file` still follow the workdir boundary, while scripts that write files or execute commands remain blocked.
 
 Glob patterns are decided from the directory they expand from, the part of the pattern before the first wildcard. `ls docs/agent/*.md` is allowed because `docs/agent` is inside the workdir; `ls /etc/*.conf` and `ls ../*.txt` are blocked because their expansion directory is outside it. A pattern that walks out of the directory it expands from (`docs/*/../../etc/passwd`) is blocked as well, because the reachable set cannot be bounded statically. The skills and system temp exceptions apply to glob patterns too: reading `~/.agents/skills/*/SKILL.md` is allowed, writing `~/.agents/skills/*` is blocked, and `rm /tmp/*.log` is allowed while `rm -rf /tmp` is not.
 
@@ -190,6 +193,7 @@ prevent-destructive-commands/
 ├── src/
 │   ├── index.ts          # Extension entry point (factory + tool_call hook)
 │   ├── config.ts         # Blacklists and behavior flags — tune protection here
+│   ├── command-analysis.ts # Shared token cursor, heredoc, and nested-command helpers
 │   ├── tokenizer.ts      # Shell tokenizer (shlex-like)
 │   ├── checker.ts        # Recursive command walker (wrappers/shell/find/xargs)
 │   ├── read-only-command.ts # /read-only toggle and read-only tool-call gate

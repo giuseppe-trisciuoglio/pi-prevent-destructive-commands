@@ -1,6 +1,12 @@
 import {
+	analyzeHeredocCommand,
+	checkQuotedCommandWrapper,
+	classifySedOperands,
+	createCommandTokenCursor,
+	shellCommandScript,
+} from "../command-analysis";
+import {
 	DELEGATION_COMMANDS,
-	HEREDOC_EXECUTOR_COMMANDS,
 	MAX_NESTING_DEPTH,
 	PATH_SENSITIVE_COMMANDS,
 	QUOTED_COMMAND_WRAPPERS,
@@ -8,9 +14,6 @@ import {
 	SHELL_OPERATORS,
 	WRITE_REDIRECT_OPERATORS,
 } from "../config";
-import { extractHeredocs } from "../heredoc";
-import { tokenize } from "../tokenizer";
-import { forEachPositionalArg } from "./args";
 import { hasGlobMagic, hasShellVariable } from "./glob";
 import { isOutsideCwd, isSkillPath, isSystemTempRoot, type PathAccess, resolvePath } from "./path-utils";
 import { type CheckResult, SAFE, block } from "./types";
@@ -76,14 +79,14 @@ export function checkPathInsideWorkdir(
 		);
 	}
 	if (isSkillPath(resolved)) {
-		if (access === "write") {
+		if (access !== "read") {
 			return block(
 				`${JSON.stringify(p)} is inside an installed skills directory (${resolved}) — skills are read-only for the agent`,
 			);
 		}
 		return SAFE;
 	}
-	return isOutsideCwd(p, resolveCwd, boundaryCwd);
+	return isOutsideCwd(p, resolveCwd, boundaryCwd, access);
 }
 
 function addPositionals(
@@ -103,20 +106,27 @@ function addPositionals(
 	if (mode === "last" && last >= 0) indices.add(last);
 }
 
-function collectWriteTargetIndices(tokens: string[]): Set<number> {
-	const indices = new Set<number>();
+function collectWriteTargetIndices(tokens: string[]): {
+	writeTargets: Set<number>;
+	redirectTargets: Set<number>;
+} {
+	const writeTargets = new Set<number>();
+	const redirectTargets = new Set<number>();
 
 	for (let i = 0; i < tokens.length; i++) {
 		const token = tokens[i]!;
 
 		if (WRITE_REDIRECT_OPERATORS.has(token)) {
 			const next = tokens[i + 1];
-			if (next && !SHELL_OPERATORS.has(next)) indices.add(i + 1);
+			if (next && !SHELL_OPERATORS.has(next)) {
+				writeTargets.add(i + 1);
+				redirectTargets.add(i + 1);
+			}
 			continue;
 		}
 
 		if (PATH_SENSITIVE_COMMANDS.has(token)) {
-			addPositionals(tokens, i + 1, indices, "all");
+			addPositionals(tokens, i + 1, writeTargets, "all");
 			continue;
 		}
 
@@ -124,23 +134,23 @@ function collectWriteTargetIndices(tokens: string[]): Set<number> {
 			for (let j = i + 1; j < tokens.length; j++) {
 				const arg = tokens[j]!;
 				if (SHELL_OPERATORS.has(arg)) break;
-				if (arg.startsWith("of=")) indices.add(j);
+				if (arg.startsWith("of=")) writeTargets.add(j);
 			}
 			continue;
 		}
 
 		if (WRITE_TARGET_ALL_ARGS_COMMANDS.has(token)) {
-			addPositionals(tokens, i + 1, indices, "all");
+			addPositionals(tokens, i + 1, writeTargets, "all");
 			continue;
 		}
 
 		if (WRITE_TARGET_LAST_ARG_COMMANDS.has(token)) {
-			addPositionals(tokens, i + 1, indices, "last");
+			addPositionals(tokens, i + 1, writeTargets, "last");
 			continue;
 		}
 	}
 
-	return indices;
+	return { writeTargets, redirectTargets };
 }
 
 function checkCommandTokens(
@@ -155,32 +165,25 @@ function checkCommandTokens(
 		);
 	}
 
-	const writeTargets = collectWriteTargetIndices(tokens);
-	const cwdStack: string[] = [];
-	let currentCwd = cwd;
+	const { writeTargets, redirectTargets } = collectWriteTargetIndices(tokens);
+	const nonFileScriptIndices = new Set<number>();
+	const cursor = createCommandTokenCursor(tokens, cwd);
 
-	let i = 0;
-	while (i < tokens.length) {
-		const token = tokens[i];
-		if (!token) {
-			i++;
-			continue;
-		}
-
-		if (token === "(") {
-			cwdStack.push(currentCwd);
-			i++;
-			continue;
-		}
-		if (token === ")") {
-			currentCwd = cwdStack.pop() ?? cwd;
-			i++;
-			continue;
-		}
-
-		if (SHELL_OPERATORS.has(token)) {
-			i++;
-			continue;
+	for (const { token, index: i, currentCwd, startsCommand } of cursor) {
+		if (startsCommand && token === "sed") {
+			const operands = classifySedOperands(tokens, i);
+			if (operands.unsafeInlineScript) {
+				return block(
+					"sed script contains operations that cannot be verified against the working directory",
+				);
+			}
+			for (const index of operands.nonFileScriptIndices) {
+				nonFileScriptIndices.add(index);
+			}
+			for (const path of operands.scriptFilePaths) {
+				const result = checkPathInsideWorkdir(path, currentCwd, boundaryCwd, "read");
+				if (result.dangerous) return result;
+			}
 		}
 
 		if (token === "cd") {
@@ -207,40 +210,29 @@ function checkCommandTokens(
 			if (inside.dangerous) {
 				return block(`"cd" leaves the working directory — ${inside.reason}`);
 			}
-			currentCwd = resolvePath(target, currentCwd) ?? currentCwd;
-			i = j;
+			cursor.setCurrentCwd(resolvePath(target, currentCwd) ?? currentCwd);
+			cursor.skipTo(j);
 			continue;
 		}
 
 		if (SHELL_COMMANDS.has(token)) {
-			let j = i + 1;
-			while (j < tokens.length) {
-				if (tokens[j] === "-c" && j + 1 < tokens.length) {
-					const r = checkCommandWorkdir(tokens[j + 1]!, currentCwd, depth + 1);
-					if (r.dangerous) return r;
-					break;
-				}
-				if (tokens[j]!.startsWith("-")) {
-					j++;
-					continue;
-				}
-				break;
+			const script = shellCommandScript(tokens, i);
+			if (script !== undefined) {
+				const result = checkCommandWorkdir(script, currentCwd, depth + 1);
+				if (result.dangerous) return result;
 			}
-			i++;
 			continue;
 		}
 
 		if (QUOTED_COMMAND_WRAPPERS.has(token)) {
-			let dangerous: CheckResult | undefined;
-			forEachPositionalArg(tokens, i, (arg) => {
-				const r = checkCommandWorkdir(arg, currentCwd, depth + 1);
-				if (r.dangerous) {
-					dangerous = r;
-					return false;
-				}
-			});
-			if (dangerous) return dangerous;
-			i++;
+			const result = checkQuotedCommandWrapper(
+				tokens,
+				i,
+				currentCwd,
+				depth,
+				(command, nestedCwd, nestedDepth) => checkCommandWorkdir(command, nestedCwd, nestedDepth),
+			);
+			if (result.dangerous) return result;
 			continue;
 		}
 
@@ -249,26 +241,27 @@ function checkCommandTokens(
 				const r = checkCommandTokens(tokens.slice(i + 1), currentCwd, depth + 1, boundaryCwd);
 				if (r.dangerous) return r;
 			}
-			i++;
 			continue;
 		}
+
+		if (nonFileScriptIndices.has(i)) continue;
 
 		if (/\s/.test(token) && token.includes("/")) {
 			const r = checkCommandWorkdir(token, currentCwd, depth + 1);
 			if (r.dangerous) return r;
-			i++;
 			continue;
 		}
 
 		if (looksLikePath(token)) {
-			const access: WorkdirAccess = writeTargets.has(i) ? "write" : "read";
+			const access: WorkdirAccess = redirectTargets.has(i)
+				? "redirect"
+				: writeTargets.has(i)
+					? "write"
+					: "read";
 			const r = checkPathInsideWorkdir(token, currentCwd, boundaryCwd, access);
 			if (r.dangerous) return r;
-			i++;
 			continue;
 		}
-
-		i++;
 	}
 
 	return SAFE;
@@ -281,23 +274,11 @@ export function checkCommandWorkdir(command: string, cwd: string, depth = 0): Ch
 		);
 	}
 
-	const extraction = extractHeredocs(command);
-	if (extraction === null) {
-		return checkCommandTokens(tokenize(command), cwd, depth, cwd);
-	}
-
-	const lineTokens = tokenize(extraction.text);
-	const result = checkCommandTokens(lineTokens, cwd, depth, cwd);
-	if (result.dangerous) return result;
-
-	if (extraction.bodies.length > 0 && lineTokens.some((t) => HEREDOC_EXECUTOR_COMMANDS.has(t))) {
-		for (const body of extraction.bodies) {
-			const r = checkCommandWorkdir(body, cwd, depth + 1);
-			if (r.dangerous) return r;
-		}
-	}
-
-	return result;
+	return analyzeHeredocCommand(
+		command,
+		(tokens) => checkCommandTokens(tokens, cwd, depth, cwd),
+		(body) => checkCommandWorkdir(body, cwd, depth + 1),
+	);
 }
 
 export function checkToolInputWorkdir(
