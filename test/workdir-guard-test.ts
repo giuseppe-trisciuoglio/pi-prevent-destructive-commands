@@ -78,6 +78,52 @@ case_("sed -n '/pattern/w /etc/passwd' src/file.txt", true, "a sed script that w
 case_("sed --expression='/pattern/w /etc/passwd' src/file.txt", true, "an attached unsafe sed expression remains blocked");
 case_("grep sed '/pattern/p'", true, "sed is only classified as a command at command start");
 
+case_(
+	"git add -A && git commit -m \"feat(conversazioni): lista /conversazioni su viewport < 768px\"",
+	false,
+	"a commit message containing path-like words is free text",
+);
+case_(
+	"git commit -m 'fix: mention of /etc/passwd in docs'",
+	false,
+	"an absolute-looking path inside a commit message is not a target",
+);
+case_(
+	'git commit --message="fix path /usr/bin mention"',
+	false,
+	"an attached --message value is free text",
+);
+case_(
+	"git commit -am \"chore: full /width layout\"",
+	false,
+	"combined short flags ending in m take message text",
+);
+case_(
+	"git tag -a v1.0 -m 'release /build notes' && git commit -m 'second /msg'",
+	false,
+	"message text is free text across chained commands",
+);
+case_(
+	"git notes add -m 'note about /conversazioni'",
+	false,
+	"git notes messages are free text",
+);
+case_(
+	"git commit -F /etc/passwd",
+	true,
+	"a commit message file outside the workdir remains blocked",
+);
+case_(
+	"git add /etc/passwd",
+	true,
+	"git path arguments outside the workdir remain blocked",
+);
+case_(
+	"git commit -m \"msg\" --template=/etc/template",
+	true,
+	"a commit template outside the workdir remains blocked",
+);
+
 case_("cat ~/.agents/skills/graphify/SKILL.md", false, "reading an installed skill is allowed");
 case_("cat ~/.pi/skills/custom/SKILL.md", false, "reading a pi skill is allowed");
 case_("ls ~/.agents/skills", false, "listing the skills directory is allowed");

@@ -37,6 +37,59 @@ const WRITE_TARGET_LAST_ARG_COMMANDS: ReadonlySet<string> = new Set([
 	"ln",
 ]);
 
+const GIT_MESSAGE_SUBCOMMANDS: ReadonlySet<string> = new Set([
+	"commit",
+	"tag",
+	"merge",
+	"notes",
+	"stash",
+]);
+
+const GIT_MESSAGE_VALUE_PREFIXES: readonly string[] = ["--message=", "--notes="];
+const GIT_MESSAGE_VALUE_FLAGS: ReadonlySet<string> = new Set(["--message", "--notes"]);
+
+function collectGitMessageIndices(tokens: string[]): Set<number> {
+	const skip = new Set<number>();
+	let gitSubcommand: string | null = null;
+	let seenGit = false;
+	for (let i = 0; i < tokens.length; i++) {
+		const token = tokens[i]!;
+		if (SHELL_OPERATORS.has(token)) {
+			seenGit = false;
+			gitSubcommand = null;
+			continue;
+		}
+		if (!seenGit) {
+			if (token === "git") seenGit = true;
+			continue;
+		}
+		if (gitSubcommand === null) {
+			if (!token.startsWith("-")) gitSubcommand = token;
+			continue;
+		}
+		if (!GIT_MESSAGE_SUBCOMMANDS.has(gitSubcommand)) continue;
+		if (token === "-m" || GIT_MESSAGE_VALUE_FLAGS.has(token)) {
+			if (i + 1 < tokens.length) skip.add(i + 1);
+			continue;
+		}
+		if (/^-[a-zA-Z]+m$/.test(token)) {
+			if (i + 1 < tokens.length) skip.add(i + 1);
+			continue;
+		}
+		for (const prefix of GIT_MESSAGE_VALUE_PREFIXES) {
+			if (token === prefix) {
+				if (i + 1 < tokens.length) skip.add(i + 1);
+				break;
+			}
+			if (token.startsWith(prefix)) {
+				skip.add(i);
+				break;
+			}
+		}
+	}
+	return skip;
+}
+
 export function isWriteTool(toolName: string): boolean {
 	if (toolName === "write" || toolName === "edit") return true;
 	if (toolName.endsWith("apply_patch")) return true;
@@ -166,6 +219,7 @@ function checkCommandTokens(
 	}
 
 	const { writeTargets, redirectTargets } = collectWriteTargetIndices(tokens);
+	const gitMessageIndices = collectGitMessageIndices(tokens);
 	const nonFileScriptIndices = new Set<number>();
 	const cursor = createCommandTokenCursor(tokens, cwd);
 
@@ -245,6 +299,17 @@ function checkCommandTokens(
 		}
 
 		if (nonFileScriptIndices.has(i)) continue;
+
+		if (gitMessageIndices.has(i)) continue;
+
+		if (token.startsWith("--template=")) {
+			const templatePath = token.slice("--template=".length);
+			if (templatePath) {
+				const r = checkPathInsideWorkdir(templatePath, currentCwd, boundaryCwd, "read");
+				if (r.dangerous) return r;
+			}
+			continue;
+		}
 
 		if (/\s/.test(token) && token.includes("/")) {
 			const r = checkCommandWorkdir(token, currentCwd, depth + 1);
