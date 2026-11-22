@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The workdir boundary guard no longer treats program and pattern operands starting with `/` as paths. `awk '/^<<<<<<</,/^>>>>>>>/' f`, `grep '/api/' f`, `grep -e/--regexp`, `rg '/api/' src`, `sed -n '/start/,/end/p' f` (ranges, `+N`, `\%re%`, multiple `-e`), `perl -ne 'print if /x/'`, `node -e "x.replace(/a/,'b')"` and `python3 -c "re.sub(r'/x/', ...)"` are allowed. Input files, `-f`/`--file` program and pattern files, interpreter script files, and string literals inside inline programs that name outside paths (`open('/etc/passwd')`, `system("cat /etc/passwd")`) are still blocked. Exempt tools: `grep`/`egrep`/`fgrep`, `rg`, `ag`, `awk`/`gawk`/`mawk`/`nawk`, `sed`, `node`/`bun`, `deno eval`, `python*`, `ruby`, `perl`. See issue #46 and `docs/adr/0012-program-and-pattern-operands.md`.
+
+### Fixed
+
 - Deletions performed as a side effect of high-level commands are now covered. `gh pr close --delete-branch` (and `-d`, `--delete-branch=true`, `-dc msg`, with `-R owner/repo` anywhere) is blocked, because the PR is unmerged and its commits may become unreachable. `git worktree remove --force` / `-f` / `-ff` / `-f -f` is blocked when the worktree has uncommitted or untracked changes, is locked, or its state cannot be checked; a clean, unlocked worktree is still removable. `gh pr merge --delete-branch` and `git worktree prune` stay allowed. See issue #45 and `docs/adr/0011-side-effect-deletions.md`.
 
 ## [1.4.9] - 2026-11-22

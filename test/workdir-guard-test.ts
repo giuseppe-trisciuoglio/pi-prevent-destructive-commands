@@ -113,6 +113,43 @@ case_("sed -n '/pattern/w /etc/passwd' src/file.txt", true, "a sed script that w
 case_("sed --expression='/pattern/w /etc/passwd' src/file.txt", true, "an attached unsafe sed expression remains blocked");
 case_("grep sed '/pattern/p'", true, "sed is only classified as a command at command start");
 
+// Issue #46: program and pattern operands of text tools and interpreters are not paths.
+case_("awk '/^<<<<<<</,/^>>>>>>>/' js/a.js", false, "awk range program is not a path");
+case_("awk '/foo/' js/a.js", false, "awk regex program is not a path");
+case_("awk -F / '{print $1}' js/a.js", false, "awk -F separator is a pattern");
+case_("awk -F/ '{print $1}' js/a.js", false, "awk attached -F separator");
+case_("sed -n '/start/,/end/p' js/a.js", false, "sed range address followed by a command");
+case_("sed -n '/re/,+3p' js/a.js", false, "sed range with +N");
+case_("sed -n '10,/end/p' js/a.js", false, "sed range from a line number");
+case_("sed -n '\\%/usr%p' js/a.js", false, "sed custom-delimiter address");
+case_("sed -n -e '/a/,/b/p' -e '/c/d' js/a.js", false, "multiple sed -e scripts");
+case_("grep '/api/' js/a.js", false, "grep pattern is not a path");
+case_("grep -e '/x/' js/a.js", false, "grep -e pattern is not a path");
+case_("grep --regexp=/x/ js/a.js", false, "grep attached --regexp pattern");
+case_("grep -rn '/api/' src", false, "grep pattern after a short-option cluster");
+case_("rg '/api/' js", false, "rg pattern is not a path");
+case_("rg -e '/a/' -e '/b/' src", false, "multiple rg -e patterns");
+case_("perl -ne 'print if /foo/' js/a.js", false, "perl -ne program is not a path");
+case_("node -e \"const s=x.replace(/d.order === 3/,'y'); console.log(s)\"", false, "node -e regex literal is not a path");
+case_("node -e \"console.log('a/b'.replace(/a\\\\/b/, 'c'))\"", false, "node -e relative string literal");
+case_("python3 -c \"import re; print(re.sub(r'/x/', '', 'a'))\"", false, "python re.sub pattern is not a path");
+case_("awk '/x/' /etc/passwd", true, "awk input file outside remains blocked");
+case_("grep x /etc/hosts", true, "grep input file outside remains blocked");
+case_("rg x /etc", true, "rg search path outside remains blocked");
+case_("awk -f /etc/p.awk js/a.js", true, "awk program file outside remains blocked");
+case_("grep -f /etc/patterns js/a.js", true, "grep pattern file outside remains blocked");
+case_("rg --file /etc/patterns js", true, "rg pattern file outside remains blocked");
+case_("sed -n '/start/,/end/p' /etc/passwd", true, "sed input outside remains blocked");
+case_("sed -n '/a/,/b/w /etc/x' js/a.js", true, "sed range that writes outside remains blocked");
+case_("awk '{print > \"/etc/x\"}' js/a.js", true, "awk string literal path outside is checked");
+case_("awk 'BEGIN{system(\"cat /etc/passwd\")}'", true, "awk system() command line is checked");
+case_("node -e \"require('fs').readFileSync('/etc/passwd')\"", true, "node string literal path outside is checked");
+case_("python3 -c \"open('/etc/passwd').read()\"", true, "python string literal path outside is checked");
+case_("ruby -e 'File.read(\"/etc/passwd\")'", true, "ruby string literal path outside is checked");
+case_("perl -ne 'print' /etc/passwd", true, "perl input file outside remains blocked");
+case_("python3 /etc/x.py", true, "interpreter script file outside remains blocked");
+case_("node -e \"s.replace(/'/g, 'x'); fs.readFileSync('/etc/passwd')\"", true, "unparseable program falls back to token analysis");
+
 case_(
 	"git add -A && git commit -m \"feat(conversazioni): lista /conversazioni su viewport < 768px\"",
 	false,

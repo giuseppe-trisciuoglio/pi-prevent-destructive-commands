@@ -142,12 +142,31 @@ export interface SedOperandClassification {
 	unsafeInlineScript: boolean;
 }
 
-function isNonFileSedScript(script: string): boolean {
-	if (!script.startsWith("/")) return false;
+/** Read-only sed commands that take no argument (no `w`, `r`, `e`, `s`, `y`). */
+const SED_READ_ONLY_COMMANDS = "pPdDnNhHgGxlz=";
 
+/**
+ * Parses one sed address at `script[i]`: a line number, `$`, `first~step`,
+ * `/re/` or `\cREc` (with `I`/`M` flags), and for the second address of a
+ * range also `+N` and `~N`. Returns the index after it, or -1.
+ */
+function parseSedAddress(script: string, i: number, second: boolean): number {
+	const numeric = (second ? /^(?:\d+~\d+|\d+|\$|[+~]\d+)/ : /^(?:\d+~\d+|\d+|\$)/).exec(script.slice(i));
+	if (numeric) return i + numeric[0].length;
+	let delimiter: string;
+	let j: number;
+	if (script[i] === "/") {
+		delimiter = "/";
+		j = i + 1;
+	} else if (script[i] === "\\" && i + 1 < script.length && !/[\s\\\n]/.test(script[i + 1]!)) {
+		delimiter = script[i + 1]!;
+		j = i + 2;
+	} else {
+		return -1;
+	}
 	let escaped = false;
-	for (let index = 1; index < script.length; index++) {
-		const character = script[index]!;
+	for (; j < script.length; j++) {
+		const character = script[j]!;
 		if (escaped) {
 			escaped = false;
 			continue;
@@ -156,11 +175,76 @@ function isNonFileSedScript(script: string): boolean {
 			escaped = true;
 			continue;
 		}
-		if (character === "/") {
-			return /^[pPdDqQnNhHgGxbtl=;]*$/.test(script.slice(index + 1));
+		if (character === "\n") return -1;
+		if (character === delimiter) {
+			j++;
+			while (j < script.length && (script[j] === "I" || script[j] === "M")) j++;
+			return j;
 		}
 	}
-	return false;
+	return -1;
+}
+
+/**
+ * Whether a sed script only selects and prints lines: a sequence (`;` or
+ * newline separated) of `[addr[,addr2]][!]cmd` where every command is
+ * read-only (`p`, `d`, `n`, `q`, `{`, `}`, bare `b`/`t`, ...). Such a script
+ * cannot name a file, so a `/` inside it is a regex delimiter.
+ */
+function isNonFileSedScript(script: string): boolean {
+	if (!script.includes("/") && !script.includes("\\")) return false;
+	let i = 0;
+	let sawCommand = false;
+	const skipBlanks = () => {
+		while (i < script.length && /[ \t]/.test(script[i]!)) i++;
+	};
+	while (i < script.length) {
+		skipBlanks();
+		if (i >= script.length) break;
+		if (script[i] === ";" || script[i] === "\n" || script[i] === "}") {
+			i++;
+			continue;
+		}
+		const first = parseSedAddress(script, i, false);
+		if (first >= 0) {
+			i = first;
+			skipBlanks();
+			if (script[i] === ",") {
+				i++;
+				skipBlanks();
+				const second = parseSedAddress(script, i, true);
+				if (second < 0) return false;
+				i = second;
+			}
+		}
+		skipBlanks();
+		while (script[i] === "!") {
+			i++;
+			skipBlanks();
+		}
+		const command = script[i];
+		if (command === undefined) return false;
+		if (command === "{") {
+			i++;
+			continue;
+		}
+		if (SED_READ_ONLY_COMMANDS.includes(command)) {
+			i++;
+		} else if (command === "q" || command === "Q") {
+			i++;
+			while (i < script.length && /\d/.test(script[i]!)) i++;
+		} else if (command === "b" || command === "t" || command === "T") {
+			i++;
+			skipBlanks();
+			if (i < script.length && !/[;\n}]/.test(script[i]!)) return false;
+		} else {
+			return false;
+		}
+		sawCommand = true;
+		skipBlanks();
+		if (i < script.length && !/[;\n}]/.test(script[i]!)) return false;
+	}
+	return sawCommand;
 }
 
 export function classifySedOperands(

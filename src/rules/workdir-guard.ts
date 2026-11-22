@@ -15,6 +15,7 @@ import {
 	WRITE_REDIRECT_OPERATORS,
 } from "../config";
 import { hasGlobMagic, hasShellVariable } from "./glob";
+import { classifyProgramOperands, extractProgramLiterals, type ProgramLanguage } from "./program-operands";
 import { isOutsideCwd, isSkillPath, isSystemTempRoot, type PathAccess, resolvePath } from "./path-utils";
 import { type CheckResult, SAFE, block } from "./types";
 
@@ -473,6 +474,27 @@ function collectWriteTargetIndices(tokens: string[]): {
 	return { writeTargets, redirectTargets, outputOptionTargets };
 }
 
+/** The program text of a token, without an attached option prefix (`--eval=`, `-e`). */
+function programText(token: string): string {
+	const long = /^--[A-Za-z-]+=/.exec(token);
+	if (long) return token.slice(long[0].length);
+	const short = /^-[A-Za-z]*[A-Za-z]/.exec(token);
+	if (token.startsWith("-") && short) return token.slice(short[0].length);
+	return token;
+}
+
+/**
+ * Checks one string literal of an inline program: literals holding a shell
+ * command line (whitespace and a `/`) are analyzed as commands, other
+ * path-like literals as paths. URLs are skipped.
+ */
+function checkProgramLiteral(literal: string, cwd: string, boundaryCwd: string, depth: number): CheckResult {
+	if (literal.includes("://")) return SAFE;
+	if (/\s/.test(literal) && literal.includes("/")) return checkCommandWorkdir(literal, cwd, depth + 1);
+	if (looksLikePath(literal)) return checkPathInsideWorkdir(literal, cwd, boundaryCwd, "read");
+	return SAFE;
+}
+
 function checkCommandTokens(
 	tokens: string[],
 	cwd: string,
@@ -489,9 +511,34 @@ function checkCommandTokens(
 	const gitMessageIndices = collectGitMessageIndices(tokens);
 	const { endpointIndices, atFilePaths } = collectApiEndpointIndices(tokens);
 	const nonFileScriptIndices = new Set<number>();
+	const patternIndices = new Set<number>();
+	const programIndices = new Map<number, ProgramLanguage>();
 	const cursor = createCommandTokenCursor(tokens, cwd);
 
 	for (const { token, index: i, currentCwd, startsCommand } of cursor) {
+		if (startsCommand) {
+			const operands = classifyProgramOperands(tokens, i);
+			if (operands !== null) {
+				for (const index of operands.patternIndices) patternIndices.add(index);
+				for (const [index, language] of operands.programIndices) programIndices.set(index, language);
+			}
+		}
+
+		if (patternIndices.has(i)) continue;
+
+		const language = programIndices.get(i);
+		if (language !== undefined) {
+			const literals = extractProgramLiterals(programText(token), language);
+			if (literals !== null) {
+				for (const literal of literals) {
+					const r = checkProgramLiteral(literal, currentCwd, boundaryCwd, depth);
+					if (r.dangerous) return r;
+				}
+				continue;
+			}
+			// Unparseable program: fall through to the generic token analysis.
+		}
+
 		if (startsCommand && token === "sed") {
 			const operands = classifySedOperands(tokens, i);
 			if (operands.unsafeInlineScript) {
