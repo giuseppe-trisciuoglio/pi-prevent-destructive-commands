@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.9] - 2026-11-22
+
 ### Fixed
 
 - The workdir boundary guard now lets the agent move into and read the system temp root: `cd /tmp`, `cd /private/tmp`, `pushd /tmp`, `ls /tmp` and relative paths after `cd /tmp` are allowed. Write, move and delete operations on the temp root itself stay blocked (`rm -rf /tmp`, `chmod 777 /tmp`, `mv /tmp ./x`), and `mv` sources are now treated as write targets because `mv` removes them. See issue #47 and `docs/adr/0010-temp-root-read-access.md`.
@@ -108,7 +110,9 @@ Cumulative entry: these changes were released across 1.2.1–1.4.7 and were not 
 - No interactive confirmation — protection works in non-interactive modes (`-p`, JSON, RPC).
 - Maximum nesting depth limit (5) to prevent obfuscation attacks.
 
-[Unreleased]: https://github.com/giuseppe-trisciuoglio/pi-prevent-destructive-commands/compare/v1.4.8...HEAD
+[Unreleased]: https://github.com/giuseppe-trisciuoglio/pi-prevent-destructive-commands/compare/v1.4.9...HEAD
+
+[1.4.9]: https://github.com/giuseppe-trisciuoglio/pi-prevent-destructive-commands/compare/v1.4.8...v1.4.9
 
 [1.4.8]: https://github.com/giuseppe-trisciuoglio/pi-prevent-destructive-commands/compare/v1.4.7...v1.4.8
 
