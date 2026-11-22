@@ -45,6 +45,18 @@ case_("cp ./file.txt /tmp/", false, "tmp destination allowed");
 case_("rm /tmp/temp.log", false, "tmp removal allowed");
 case_("mkdir /tmp/newdir", false, "tmp mkdir allowed");
 case_("rm -rf /tmp", true, "the temp root itself is not a temp file");
+case_("cd /tmp", false, "cd into the temp root is allowed");
+case_("cd /private/tmp && ls", false, "cd into the canonical temp root is allowed");
+case_("pushd /tmp", false, "pushd into the temp root is allowed");
+case_("ls /tmp", false, "listing the temp root is allowed");
+case_("cd /tmp && cat a.txt", false, "relative path after cd /tmp stays in temp");
+case_("cd /tmp && rm -rf foo", false, "temp file removal after cd /tmp");
+case_("cd /tmp && cat ../etc/passwd", true, "leaving temp after cd /tmp is blocked");
+case_("cd /tmp && cd .. && ls", true, "cd out of temp is blocked");
+case_("chmod 777 /tmp", true, "changing the temp root itself is blocked");
+case_("mv /tmp ./x", true, "moving the temp root away is blocked");
+case_("mv /tmp/a.txt ./a.txt", false, "moving a temp file into the workdir is allowed");
+case_("mv ~/.agents/skills/x.md ./", true, "moving a skill out removes it and is blocked");
 
 case_(
 	"grep -rn \"pattern\" docs/ .pi/ 2>/dev/null | head -30",
@@ -241,6 +253,14 @@ if (checkPathInsideWorkdir("src/file.ts", CWD, CWD).dangerous) {
 	failed++;
 	console.error("FAIL checkPathInsideWorkdir relative inside");
 } else passed++;
+
+if (!checkToolInputWorkdir("write", { path: "/tmp" }, () => [], CWD).dangerous) {
+	failed++;
+	console.error("FAIL write tool on the temp root must be blocked");
+} else {
+	passed++;
+	console.log("PASS write tool on the temp root is blocked");
+}
 
 if (checkPathInsideWorkdir("/tmp/x", CWD, CWD).dangerous) {
 	failed++;

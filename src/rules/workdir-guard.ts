@@ -28,11 +28,11 @@ const WRITE_TARGET_ALL_ARGS_COMMANDS: ReadonlySet<string> = new Set([
 	"chmod",
 	"chown",
 	"chgrp",
+	"mv",
 ]);
 
 const WRITE_TARGET_LAST_ARG_COMMANDS: ReadonlySet<string> = new Set([
 	"cp",
-	"mv",
 	"install",
 	"ln",
 ]);
@@ -385,9 +385,9 @@ export function checkPathInsideWorkdir(
 	if (resolved === null) {
 		return block(`cannot safely resolve path: ${JSON.stringify(p)}`);
 	}
-	if (!p.endsWith("/") && isSystemTempRoot(resolved)) {
+	if (access !== "read" && !p.endsWith("/") && isSystemTempRoot(resolved)) {
 		return block(
-			`${JSON.stringify(p)} targets the system temp directory root itself — temp files are allowed, the temp root is not`,
+			`${JSON.stringify(p)} targets the system temp directory root itself — temp files are allowed, writing to the temp root is not`,
 		);
 	}
 	if (isSkillPath(resolved)) {
