@@ -31,6 +31,15 @@ write target. The exact normalized path `/dev/null` is allowed only when it is
 the destination of a configured shell write-redirect operator, including `2>`
 and `>`.
 
+The same exception applies when `/dev/null` is the value of an output option
+(`-o`, `-O`, `--output`, `--output-document`), as in
+`curl -s -o /dev/null -w '%{http_code}' URL` or `wget -q -O /dev/null URL`
+(amended for [#37](https://github.com/giuseppe-trisciuoglio/pi-prevent-destructive-commands/issues/37)).
+It does not apply when the token is also an operand of a destructive or write
+command (`rm -o /dev/null`, `cp -o ./file /dev/null` stay blocked), and output
+options pointing anywhere else (`curl -o /etc/passwd`, `curl -o /dev/stdout`)
+remain blocked.
+
 The null-device exception does not apply to direct reads, file-tool writes,
 ordinary write commands, or destructive commands. Other paths under `/dev`
 remain blocked. Redirecting into an installed skills directory remains blocked
@@ -44,6 +53,8 @@ exception and keeps the existing read, write, and skill protections.
 
 - Common commands that discard standard output or standard error through
   `/dev/null` work without disabling the workdir guard.
+- Output options that discard downloads or build output (`curl -o /dev/null`,
+  `wget -O /dev/null`) work without disabling the workdir guard.
 - Direct access to `/dev/null` remains blocked, preserving the boundary for
   file tools and commands that are not redirects.
 - Other special devices remain outside the exception and are blocked.

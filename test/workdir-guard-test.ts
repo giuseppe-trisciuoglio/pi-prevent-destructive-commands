@@ -58,6 +58,18 @@ case_("rm /dev/null", true, "destructive null device access remains blocked");
 case_("cp ./file.txt /dev/null", true, "ordinary writes to the null device remain blocked");
 case_("echo output > /dev/stdout", true, "other device paths remain blocked");
 case_("echo output > /etc/passwd", true, "redirects to other outside paths remain blocked");
+case_(
+	"(npx vite --port 5199 >/tmp/vite-smoke.log 2>&1 &) && sleep 2 && curl -s http://localhost:5199/ | grep -o '<title>[^<]*</title>' && curl -s -o /dev/null -w '%{http_code}\\n' http://localhost:5199/src/main.js && pkill -f \"vite --port 5199\"",
+	false,
+	"curl output option discarded to the null device (issue #37)",
+);
+case_("curl -s -o /dev/null http://localhost:5199/", false, "curl -o /dev/null allowed");
+case_("curl --output /dev/null http://localhost:5199/", false, "curl --output /dev/null allowed");
+case_("wget -q -O /dev/null http://localhost:5199/", false, "wget -O /dev/null allowed");
+case_("curl -o /etc/passwd http://localhost:5199/", true, "output option to other outside paths remains blocked");
+case_("curl -o /dev/stdout http://localhost:5199/", true, "output option to other devices remains blocked");
+case_("rm -o /dev/null", true, "destructive command operand stays blocked even after -o");
+case_("cp -o ./file.txt /dev/null", true, "copy destination stays blocked even after -o");
 
 case_(
 	"sed -n '/ThreadsLista\\|ThreadRiga\\|threads /p' \"Hotello - Conversazioni.dc.html\" | head -5",
