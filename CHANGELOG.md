@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.8] - 2026-11-22
+
+### Fixed
+
+- The workdir boundary guard now allows `/dev/null` as the value of an output option (`-o`, `-O`, `--output`, `--output-document`), so commands such as `curl -s -o /dev/null -w '%{http_code}' URL` and `wget -q -O /dev/null URL` are no longer blocked. Output options pointing to other outside paths or devices, and `/dev/null` used as an operand of destructive or write commands (`rm`, `cp`, ...), remain blocked. See issue #37 and the amended `docs/adr/0004-null-device-redirection.md`.
+- The workdir boundary guard now checks path values attached to long options (`--name=value`). `curl --output=/etc/passwd URL`, `wget --output-document=~/.bashrc URL` and `tar --file=/etc/shadow -t` are blocked, while `--output=/dev/null`, temp paths, paths inside the working directory, URLs, and free-text options (`--title`, `--body`, `--message`, `--format`, ...) are unaffected. See issue #39 and `docs/adr/0007-attached-option-values.md`.
+
+## [1.4.7] - 2026-10-28
+
+Cumulative entry: these changes were released across 1.2.1–1.4.7 and were not tracked per version at the time.
+
 ### Added
 
 - New per-project read-only mode (`/read-only on|off|status`): when enabled, every mutating tool call is blocked — `write`, `edit`, any patch-style tool (`*apply_patch`), `bash`, and `powershell` — while read-only tools (`read`, `grep`, `find`, `ls`) keep working. The flag lives in `.pi/prevent-destructive-commands.json` under `readOnly` (default `false` when the file is missing or invalid), `/read-only` toggles it while preserving unrelated JSON keys, and it is independent of the destructive-command, git, migration, Nx, and comment guards. Adds `test/read-only-command-test.ts` (`npm run test:read-only-command`) and `docs/adr/0001-read-only-mode.md`.
@@ -20,8 +31,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- The workdir boundary guard now checks path values attached to long options (`--name=value`). `curl --output=/etc/passwd URL`, `wget --output-document=~/.bashrc URL` and `tar --file=/etc/shadow -t` are blocked, while `--output=/dev/null`, temp paths, paths inside the working directory, URLs, and free-text options (`--title`, `--body`, `--message`, `--format`, ...) are unaffected. See issue #39 and `docs/adr/0007-attached-option-values.md`.
-- The workdir boundary guard now allows `/dev/null` as the value of an output option (`-o`, `-O`, `--output`, `--output-document`), so commands such as `curl -s -o /dev/null -w '%{http_code}' URL` and `wget -q -O /dev/null URL` are no longer blocked. Output options pointing to other outside paths or devices, and `/dev/null` used as an operand of destructive or write commands (`rm`, `cp`, ...), remain blocked. See issue #37 and the amended `docs/adr/0004-null-device-redirection.md`.
 - The workdir boundary guard no longer mistakes a read-only, slash-delimited `sed` address for an absolute filesystem path. Commands such as `sed -n '/pattern/p' input.html` are allowed, while `sed` input files, script files supplied with `-f` or `--file`, and scripts that write files or execute commands remain protected.
 - The workdir boundary guard now allows shell output and error redirection to `/dev/null`, so common commands such as `grep -rn "pattern" docs/ .pi/ 2>/dev/null | head -30` are no longer blocked. The exception is limited to redirect destinations: direct reads, ordinary writes, file-tool writes, destructive commands, and other paths under `/dev` remain blocked. Adds regression coverage in `test/workdir-guard-test.ts`.
 - The workdir boundary guard no longer analyzes git message text for paths. `git commit -m "feat(conversazioni): lista /conversazioni ..."`, `--message=...`, and messages on `git tag`, `git merge`, `git notes`, and `git stash` (including combined short flags such as `-am`) are treated as free text, while path-valued options (`-F`/`--file`, `--template=`) and path arguments such as `git add /etc/passwd` remain blocked. Adds regression coverage in `test/workdir-guard-test.ts` and `docs/adr/0006-git-message-free-text.md`.
@@ -91,7 +100,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - No interactive confirmation — protection works in non-interactive modes (`-p`, JSON, RPC).
 - Maximum nesting depth limit (5) to prevent obfuscation attacks.
 
-[Unreleased]: https://github.com/giuseppe-trisciuoglio/pi-prevent-destructive-commands/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/giuseppe-trisciuoglio/pi-prevent-destructive-commands/compare/v1.4.8...HEAD
+
+[1.4.8]: https://github.com/giuseppe-trisciuoglio/pi-prevent-destructive-commands/compare/v1.4.7...v1.4.8
+
+[1.4.7]: https://github.com/giuseppe-trisciuoglio/pi-prevent-destructive-commands/compare/v1.2.0...v1.4.7
 
 [1.2.0]: https://github.com/giuseppe-trisciuoglio/pi-prevent-destructive-commands/compare/v1.1.0...v1.2.0
 
