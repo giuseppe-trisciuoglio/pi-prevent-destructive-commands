@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Remote deletions are now blocked by effect, not by a single syntax. `gh api` blocks method `DELETE` in every spelling `gh` accepts (`-XDELETE`, `-X=DELETE`, `-iX DELETE`, ...) and a method that cannot be resolved statically (`-X "$M"`). `gh api graphql` blocks destructive mutations (`delete*`, `remove*`, `archive*`, `transfer*`, `updateRefs`) in inline queries, `-F query=@file` and `--input file`, and blocks payloads that cannot be inspected (stdin, unreadable file, variable-only query). Generic HTTP clients (`curl`, `wget`, HTTPie, `xh`) are blocked when they send `DELETE`, an unresolvable method or a destructive GraphQL mutation to GitHub API hosts. Read-only requests stay allowed. See issue #43 and `docs/adr/0009-effect-based-remote-deletion.md`.
+
 - The workdir boundary guard no longer treats API endpoint arguments as filesystem paths. `gh api /repos/o/r/pulls`, `sonar api get "/api/ce/activity?project=x"` (also when the endpoint comes from a variable assigned in the same command), and HTTPie/xh (`http GET /api/health`) are allowed. File arguments of these clients are still checked: `gh api --input <file>`, and now also `gh api -F key=@file` and HTTPie `field=@file` / `field@file` items. See issue #41 and `docs/adr/0008-api-endpoint-arguments.md`.
 
 ## [1.4.8] - 2026-11-22

@@ -18,6 +18,7 @@ import {
 	DELEGATION_COMMANDS,
 	FILE_READING_COMMANDS,
 	FIND_EXEC_FLAGS,
+	HTTP_CLIENT_COMMANDS,
 	MAX_NESTING_DEPTH,
 	PATH_SENSITIVE_COMMANDS,
 	QUOTED_COMMAND_WRAPPERS,
@@ -30,6 +31,7 @@ import { checkDocker } from "./rules/docker";
 import { checkFileReading } from "./rules/file-reading";
 import { checkGh } from "./rules/gh";
 import { checkGit } from "./rules/git";
+import { checkHttpClient } from "./rules/http-client";
 import { checkPathSensitive } from "./rules/path-sensitive";
 import { isOutsideCwd, resolvePath } from "./rules/path-utils";
 import { type CheckResult, SAFE, block } from "./rules/types";
@@ -247,9 +249,16 @@ export function checkTokens(
 		}
 
 		if (token === "gh") {
-			const r = checkGh(tokens, i);
+			const r = checkGh(tokens, i, currentCwd ?? cwd);
 			if (r.dangerous) return r;
 			continue;
+		}
+
+		// Generic HTTP clients: destructive requests to GitHub API hosts. Not a
+		// `continue`: the client may also be subject to the rules below.
+		if (HTTP_CLIENT_COMMANDS.has(token)) {
+			const r = checkHttpClient(tokens, i, currentCwd ?? cwd);
+			if (r.dangerous) return r;
 		}
 
 		if (token === "git") {
