@@ -39,7 +39,7 @@ All rules are defined in [`src/config.ts`](src/config.ts) and can be customized.
 | **Destructive Docker** | `docker rm` / `rmi`, `docker container/image/volume/network rm`, `docker * prune`, `docker compose down -v`, `docker compose rm`, `docker context rm`, `docker swarm leave --force` |
 | **Destructive GitHub CLI** | `gh api -X DELETE` / `gh api --method DELETE`, `gh repo delete` / `rename`, `gh release delete`, `gh gist delete`, `gh secret delete`, `gh variable delete`, `gh label delete`, `gh workflow disable`, `gh run delete` |
 | **Destructive AWS CLI** | `aws s3 rm`, `aws ec2 terminate-instances`, `aws rds delete-db-instance`, `aws cloudformation delete-stack`, and 50+ more subcommands (full list in `src/config.ts`) |
-| **Paths outside the workdir** | Any tool or bash command touching a path that resolves outside the working directory: `cat /etc/passwd`, `cp ~/.ssh/id_rsa ./`, `write`/`edit` to `../outside.ts`, `apply_patch` creating files outside cwd, `cd /etc && cat passwd`. Paths under a system temp directory (`/tmp`, `os.tmpdir()`) are allowed; the temp root itself is not. Shell redirection to `/dev/null` is allowed, while direct access to it and other paths under `/dev` remain blocked *(see the per-project opt-out below)* |
+| **Paths outside the workdir** | Any tool or bash command touching a path that resolves outside the working directory: `cat /etc/passwd`, `cp ~/.ssh/id_rsa ./`, `write`/`edit` to `../outside.ts`, `apply_patch` creating files outside cwd, `cd /etc && cat passwd`. Paths under a system temp directory (`/tmp`, `os.tmpdir()`) are allowed; the temp root itself is not. Shell redirection to `/dev/null` and output options pointing to it (`curl -o /dev/null`, `wget -O /dev/null`) are allowed, while direct access to it and other paths under `/dev` remain blocked *(see the per-project opt-out below)* |
 | **Writes to skills** | Writing to an installed skill under `~/.agents/skills/` or `~/.pi/skills/`: `write`/`edit`/`apply_patch`, `echo x > SKILL.md`, `tee`, `cp`, `mv`, `chmod`. Reading those skills is allowed. |
 | **Sensitive file reads** | `cat`, `grep`, etc. on `.env`, SSH keys, `.pem` files — **disabled by default** via `ENABLE_SENSITIVE_FILE_CHECK` *(see Configuration)* |
 | **Existing Nx configuration** | `package.json`, `tsconfig.json`, `tsconfig.base.json`, `tsconfig.lib.json`, and `tsconfig.spec.json` anywhere below a workspace containing `nx.json`. Creating a missing file is allowed; changing or deleting an existing file is blocked. |
@@ -158,6 +158,7 @@ Allowed without any opt-out:
 - paths inside the working directory, relative or absolute;
 - paths under a system temp directory (`/tmp`, `os.tmpdir()`), so temp files keep working;
 - shell output and error redirection to the Unix null device (`2>/dev/null`, `>/dev/null`);
+- `/dev/null` as the value of an output option (`-o`, `-O`, `--output`, `--output-document`), e.g. `curl -s -o /dev/null -w '%{http_code}' URL`;
 - **reading** the installed skills, under `~/.agents/skills/` and `~/.pi/skills/`;
 - glob patterns that expand from a directory inside the working directory (`docs/agent/*.md`, `src/**/*.tsx`).
 

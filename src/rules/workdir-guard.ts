@@ -37,6 +37,13 @@ const WRITE_TARGET_LAST_ARG_COMMANDS: ReadonlySet<string> = new Set([
 	"ln",
 ]);
 
+const OUTPUT_OPTION_FLAGS: ReadonlySet<string> = new Set([
+	"-o",
+	"-O",
+	"--output",
+	"--output-document",
+]);
+
 const GIT_MESSAGE_SUBCOMMANDS: ReadonlySet<string> = new Set([
 	"commit",
 	"tag",
@@ -162,9 +169,11 @@ function addPositionals(
 function collectWriteTargetIndices(tokens: string[]): {
 	writeTargets: Set<number>;
 	redirectTargets: Set<number>;
+	outputOptionTargets: Set<number>;
 } {
 	const writeTargets = new Set<number>();
 	const redirectTargets = new Set<number>();
+	const outputOptionTargets = new Set<number>();
 
 	for (let i = 0; i < tokens.length; i++) {
 		const token = tokens[i]!;
@@ -175,6 +184,12 @@ function collectWriteTargetIndices(tokens: string[]): {
 				writeTargets.add(i + 1);
 				redirectTargets.add(i + 1);
 			}
+			continue;
+		}
+
+		if (OUTPUT_OPTION_FLAGS.has(token)) {
+			const next = tokens[i + 1];
+			if (next && !SHELL_OPERATORS.has(next)) outputOptionTargets.add(i + 1);
 			continue;
 		}
 
@@ -203,7 +218,7 @@ function collectWriteTargetIndices(tokens: string[]): {
 		}
 	}
 
-	return { writeTargets, redirectTargets };
+	return { writeTargets, redirectTargets, outputOptionTargets };
 }
 
 function checkCommandTokens(
@@ -218,7 +233,7 @@ function checkCommandTokens(
 		);
 	}
 
-	const { writeTargets, redirectTargets } = collectWriteTargetIndices(tokens);
+	const { writeTargets, redirectTargets, outputOptionTargets } = collectWriteTargetIndices(tokens);
 	const gitMessageIndices = collectGitMessageIndices(tokens);
 	const nonFileScriptIndices = new Set<number>();
 	const cursor = createCommandTokenCursor(tokens, cwd);
@@ -318,7 +333,9 @@ function checkCommandTokens(
 		}
 
 		if (looksLikePath(token)) {
-			const access: WorkdirAccess = redirectTargets.has(i)
+			const isDiscardSink =
+				redirectTargets.has(i) || (outputOptionTargets.has(i) && !writeTargets.has(i));
+			const access: WorkdirAccess = isDiscardSink
 				? "redirect"
 				: writeTargets.has(i)
 					? "write"
