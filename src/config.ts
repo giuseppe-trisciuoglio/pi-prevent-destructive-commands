@@ -188,11 +188,46 @@ export const DOCKER_DESTRUCTIVE_COMPOUND: ReadonlySet<string> = new Set([
 // =============================================================================
 
 /**
- * HTTP methods that make a `gh api` call destructive (resource deletion or
- * irreversible mutation), accepted in both short (`-X DELETE`) and long
- * (`--method DELETE`) form, in any position of the command line.
+ * HTTP methods that make a GitHub API call destructive (resource deletion).
+ * Checked for `gh api` in every flag spelling `gh` accepts (`-X DELETE`,
+ * `-XDELETE`, `-X=DELETE`, `--method DELETE`, `--method=DELETE`, any case) and
+ * for generic HTTP clients (`HTTP_CLIENT_COMMANDS`) aimed at GitHub API hosts.
+ * A method that cannot be resolved statically (variable, substitution) is
+ * treated as destructive.
  */
 export const GH_DESTRUCTIVE_METHODS: ReadonlySet<string> = new Set(["DELETE"]);
+
+/**
+ * Generic HTTP clients checked for destructive requests to GitHub API hosts
+ * (`api.github.com`, `uploads.github.com`, `*.githubusercontent.com`).
+ */
+export const HTTP_CLIENT_COMMANDS: ReadonlySet<string> = new Set([
+	"curl",
+	"wget",
+	"http",
+	"https",
+	"xh",
+	"xhs",
+]);
+
+/**
+ * GraphQL mutation name prefixes treated as destructive when sent to the
+ * GitHub GraphQL API (`deleteRef`, `deleteRepository`, `removeOutsideCollaborator`,
+ * `archiveRepository`, `transferIssue`, ...). A prefix matches only when the next
+ * character is uppercase.
+ */
+export const GH_GRAPHQL_DESTRUCTIVE_MUTATION_PREFIXES: readonly string[] = [
+	"delete",
+	"remove",
+	"archive",
+	"transfer",
+];
+
+/**
+ * Destructive GraphQL mutations that do not match a prefix above.
+ * `updateRefs` can delete refs (all-zero `afterOid`).
+ */
+export const GH_GRAPHQL_DESTRUCTIVE_MUTATIONS: ReadonlySet<string> = new Set(["updateRefs"]);
 
 /**
  * Destructive `gh` subcommands, matched as "<noun> <verb>".
