@@ -44,6 +44,29 @@ const OUTPUT_OPTION_FLAGS: ReadonlySet<string> = new Set([
 	"--output-document",
 ]);
 
+const OUTPUT_LONG_OPTIONS: ReadonlySet<string> = new Set(["--output", "--output-document"]);
+
+const FREE_TEXT_LONG_OPTIONS: ReadonlySet<string> = new Set([
+	"--title",
+	"--body",
+	"--message",
+	"--subject",
+	"--description",
+	"--notes",
+	"--grep",
+	"--format",
+	"--pretty",
+	"--author",
+	"--committer",
+	"--label",
+]);
+
+function parseLongOptionValue(token: string): { name: string; value: string } | null {
+	const match = /^(--[A-Za-z0-9][A-Za-z0-9-]*)=(.*)$/s.exec(token);
+	if (!match) return null;
+	return { name: match[1]!, value: match[2]! };
+}
+
 const GIT_MESSAGE_SUBCOMMANDS: ReadonlySet<string> = new Set([
 	"commit",
 	"tag",
@@ -321,6 +344,18 @@ function checkCommandTokens(
 			const templatePath = token.slice("--template=".length);
 			if (templatePath) {
 				const r = checkPathInsideWorkdir(templatePath, currentCwd, boundaryCwd, "read");
+				if (r.dangerous) return r;
+			}
+			continue;
+		}
+
+		const longOption = parseLongOptionValue(token);
+		if (longOption) {
+			const { name, value } = longOption;
+			if (FREE_TEXT_LONG_OPTIONS.has(name) || value.includes("://")) continue;
+			if (looksLikePath(value)) {
+				const access: WorkdirAccess = OUTPUT_LONG_OPTIONS.has(name) ? "redirect" : "read";
+				const r = checkPathInsideWorkdir(value, currentCwd, boundaryCwd, access);
 				if (r.dangerous) return r;
 			}
 			continue;

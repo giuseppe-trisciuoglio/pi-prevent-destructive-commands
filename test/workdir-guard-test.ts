@@ -70,6 +70,17 @@ case_("curl -o /etc/passwd http://localhost:5199/", true, "output option to othe
 case_("curl -o /dev/stdout http://localhost:5199/", true, "output option to other devices remains blocked");
 case_("rm -o /dev/null", true, "destructive command operand stays blocked even after -o");
 case_("cp -o ./file.txt /dev/null", true, "copy destination stays blocked even after -o");
+case_("curl --output=/etc/passwd https://example.com", true, "attached output option value outside cwd (issue #39)");
+case_("wget --output-document=~/.bashrc https://example.com", true, "attached output-document value in home dir");
+case_("tar --file=/etc/shadow -t", true, "attached option value outside cwd");
+case_("node build.js --config=../../secret.json", true, "attached relative option value escaping cwd");
+case_("curl --output=/dev/null https://example.com", false, "attached output value to the null device");
+case_("curl --output=./out.html https://example.com", false, "attached output value inside cwd");
+case_("tar --file=/tmp/a.tar -t", false, "attached option value in temp dir");
+case_("node build.js --base-url=https://example.com/a/b", false, "URL option values are not paths");
+case_("git log --format=%h/%s", false, "format strings are free text");
+case_("gh pr create --title=fix/api --body=/etc/notes", false, "title and body are free text");
+case_("tar --exclude=/etc/x --file=./a.tar -t", true, "other attached absolute values outside cwd stay blocked");
 
 case_(
 	"sed -n '/ThreadsLista\\|ThreadRiga\\|threads /p' \"Hotello - Conversazioni.dc.html\" | head -5",
