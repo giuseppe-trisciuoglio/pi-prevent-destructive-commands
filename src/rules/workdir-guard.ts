@@ -120,6 +120,229 @@ function collectGitMessageIndices(tokens: string[]): Set<number> {
 	return skip;
 }
 
+/**
+ * API clients whose endpoint argument is a URL or API path, never a
+ * filesystem path. Each entry describes how to locate the endpoint token.
+ * Flags listed in `valueFlags` consume the following token; any other flag is
+ * treated as boolean. Real file arguments (`--input <file>`, `@file` request
+ * items) stay subject to the workdir guard.
+ */
+interface ApiClientSpec {
+	/** Subcommand that must follow the client (e.g. `api`), or null. */
+	subcommand: string | null;
+	/** Whether an HTTP method positional precedes the endpoint. */
+	method: "none" | "optional" | "required";
+	valueFlags: ReadonlySet<string>;
+	/** Flags whose value is a `key=@file` field that reads a file. */
+	atFileFlags: ReadonlySet<string>;
+	/** Whether positional request items after the endpoint may embed `@file`. */
+	atFileItems: boolean;
+}
+
+const HTTP_METHOD_PATTERN = /^[A-Za-z]+$/;
+
+const GH_API_SPEC: ApiClientSpec = {
+	subcommand: "api",
+	method: "none",
+	valueFlags: new Set([
+		"-X",
+		"--method",
+		"-H",
+		"--header",
+		"-f",
+		"--raw-field",
+		"-F",
+		"--field",
+		"--input",
+		"-q",
+		"--jq",
+		"-t",
+		"--template",
+		"--cache",
+		"-p",
+		"--preview",
+		"--hostname",
+	]),
+	atFileFlags: new Set(["-F", "--field"]),
+	atFileItems: false,
+};
+
+const SONAR_API_SPEC: ApiClientSpec = {
+	subcommand: "api",
+	method: "required",
+	valueFlags: new Set(),
+	atFileFlags: new Set(),
+	atFileItems: false,
+};
+
+const HTTPIE_SPEC: ApiClientSpec = {
+	subcommand: null,
+	method: "optional",
+	valueFlags: new Set([
+		"-a",
+		"--auth",
+		"-A",
+		"--auth-type",
+		"--session",
+		"--session-read-only",
+		"-o",
+		"--output",
+		"--verify",
+		"--cert",
+		"--cert-key",
+		"--cert-key-pass",
+		"--proxy",
+		"--timeout",
+		"-p",
+		"--print",
+		"-P",
+		"--history-print",
+		"--pretty",
+		"-s",
+		"--style",
+		"--format-options",
+		"--max-redirects",
+		"--boundary",
+		"--raw",
+		"--default-scheme",
+		"--response-charset",
+		"--response-mime",
+		"--ssl",
+		"--ciphers",
+		"--unix-socket",
+		"--bearer",
+	]),
+	atFileFlags: new Set(),
+	atFileItems: true,
+};
+
+const API_CLIENTS: ReadonlyMap<string, ApiClientSpec> = new Map([
+	["gh", GH_API_SPEC],
+	["sonar", SONAR_API_SPEC],
+	["http", HTTPIE_SPEC],
+	["https", HTTPIE_SPEC],
+	["xh", HTTPIE_SPEC],
+	["xhs", HTTPIE_SPEC],
+]);
+
+const ASSIGNMENT_PREFIX = /^([A-Za-z_][A-Za-z0-9_]*)=/;
+const VARIABLE_REFERENCE = /\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?/g;
+
+/** Returns the file path embedded in a `key=@file` / `key@file` item, if any. */
+function atFilePath(item: string): string | null {
+	const match = /(:=@|=@|==|:=|=|:|@)/.exec(item);
+	if (!match) return null;
+	const separator = match[1]!;
+	if (separator !== "=@" && separator !== ":=@" && separator !== "@") return null;
+	const path = item.slice(match.index + separator.length);
+	return path || null;
+}
+
+export interface ApiEndpointAnalysis {
+	/** Token indices that are API endpoints (or variable values feeding one). */
+	endpointIndices: Set<number>;
+	/** Token index → file path read via an `@file` field or request item. */
+	atFilePaths: Map<number, string>;
+}
+
+/**
+ * Locates the endpoint argument of API clients (`gh api`, `sonar api`,
+ * HTTPie/xh) so the workdir guard does not mistake `/repos/o/r` or
+ * `/api/ce/activity` for a filesystem path. Variable assignments whose
+ * variable is referenced only through an endpoint are exempted too.
+ */
+export function collectApiEndpointIndices(tokens: string[]): ApiEndpointAnalysis {
+	const endpointIndices = new Set<number>();
+	const atFilePaths = new Map<number, string>();
+	const assignments = new Map<string, number>();
+	let i = 0;
+	while (i < tokens.length) {
+		// Skip leading variable assignments, remembering where their values live.
+		while (i < tokens.length) {
+			const match = ASSIGNMENT_PREFIX.exec(tokens[i]!);
+			if (!match) break;
+			if (tokens[i] === `${match[1]}=`) {
+				const next = tokens[i + 1];
+				if (next !== undefined && !SHELL_OPERATORS.has(next)) {
+					assignments.set(match[1]!, i + 1);
+					i += 2;
+					continue;
+				}
+				i++;
+				continue;
+			}
+			assignments.set(match[1]!, i);
+			i++;
+		}
+		const command = tokens[i];
+		if (command !== undefined && SHELL_OPERATORS.has(command)) {
+			i++;
+			continue;
+		}
+		const spec = command === undefined ? undefined : API_CLIENTS.get(command);
+		let j = i + 1;
+		if (spec && (spec.subcommand === null || tokens[j] === spec.subcommand)) {
+			if (spec.subcommand !== null) j++;
+			const argsStart = j;
+			const positionals: number[] = [];
+			for (; j < tokens.length; j++) {
+				const token = tokens[j]!;
+				if (SHELL_OPERATORS.has(token)) break;
+				if (token.startsWith("-") && token !== "-") {
+					if (spec.valueFlags.has(token)) {
+						const value = tokens[j + 1];
+						if (value !== undefined && spec.atFileFlags.has(token)) {
+							const path = atFilePath(value);
+							if (path !== null) atFilePaths.set(j + 1, path);
+						}
+						j++;
+					}
+					continue;
+				}
+				positionals.push(j);
+			}
+			let endpointPosition = 0;
+			if (spec.method === "required") {
+				// Strict form: `<client> api <METHOD> <endpoint>` with nothing in between,
+				// so an unknown flag's value is never mistaken for the endpoint.
+				const first = positionals[0];
+				const strict =
+					first === argsStart &&
+					positionals[1] === first + 1 &&
+					HTTP_METHOD_PATTERN.test(tokens[first]!);
+				endpointPosition = strict ? 1 : -1;
+			} else if (
+				spec.method === "optional" &&
+				positionals.length > 1 &&
+				HTTP_METHOD_PATTERN.test(tokens[positionals[0]!]!)
+			) {
+				endpointPosition = 1;
+			}
+			const endpoint = endpointPosition >= 0 ? positionals[endpointPosition] : undefined;
+			if (endpoint !== undefined) {
+				const token = tokens[endpoint]!;
+				if (!token.includes("$(") && !token.includes("`")) {
+					endpointIndices.add(endpoint);
+					for (const reference of token.matchAll(VARIABLE_REFERENCE)) {
+						const valueIndex = assignments.get(reference[1]!);
+						if (valueIndex !== undefined) endpointIndices.add(valueIndex);
+					}
+				}
+				if (spec.atFileItems) {
+					for (const index of positionals.slice(endpointPosition + 1)) {
+						const path = atFilePath(tokens[index]!);
+						if (path !== null) atFilePaths.set(index, path);
+					}
+				}
+			}
+		}
+		// Advance to the next command segment.
+		while (j < tokens.length && !SHELL_OPERATORS.has(tokens[j]!)) j++;
+		i = j + 1;
+	}
+	return { endpointIndices, atFilePaths };
+}
+
 export function isWriteTool(toolName: string): boolean {
 	if (toolName === "write" || toolName === "edit") return true;
 	if (toolName.endsWith("apply_patch")) return true;
@@ -258,6 +481,7 @@ function checkCommandTokens(
 
 	const { writeTargets, redirectTargets, outputOptionTargets } = collectWriteTargetIndices(tokens);
 	const gitMessageIndices = collectGitMessageIndices(tokens);
+	const { endpointIndices, atFilePaths } = collectApiEndpointIndices(tokens);
 	const nonFileScriptIndices = new Set<number>();
 	const cursor = createCommandTokenCursor(tokens, cwd);
 
@@ -339,6 +563,15 @@ function checkCommandTokens(
 		if (nonFileScriptIndices.has(i)) continue;
 
 		if (gitMessageIndices.has(i)) continue;
+
+		if (endpointIndices.has(i)) continue;
+
+		const atFile = atFilePaths.get(i);
+		if (atFile !== undefined) {
+			const r = checkPathInsideWorkdir(atFile, currentCwd, boundaryCwd, "read");
+			if (r.dangerous) return r;
+			continue;
+		}
 
 		if (token.startsWith("--template=")) {
 			const templatePath = token.slice("--template=".length);
