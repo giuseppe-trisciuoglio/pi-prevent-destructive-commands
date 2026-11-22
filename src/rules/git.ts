@@ -1,5 +1,10 @@
 /** Detects destructive Git operations (`git reset --hard`, `git push --force`, ...). */
 
+import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import { SHELL_OPERATORS } from "../config";
+import { resolvePath } from "./path-utils";
 import { type CheckResult, SAFE, block } from "./types";
 
 const GIT_GLOBAL_FLAGS_WITH_ARG: ReadonlySet<string> = new Set([
@@ -73,11 +78,108 @@ function commitProvidesMessage(rest: string[]): boolean {
 	return false;
 }
 
-export function checkGit(tokens: string[], i: number, gitGuardsEnabled: boolean): CheckResult {
+/** Runs git with `args`; returns trimmed stdout, or `null` on any failure. */
+function runGit(args: string[]): string | null {
+	try {
+		return execFileSync("git", args, {
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "ignore"],
+			timeout: 5000,
+		}).trim();
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Resolves the directory git runs in, applying every `-C <dir>` global option
+ * between `git` and the subcommand. Returns `null` when a directory cannot be
+ * resolved statically.
+ */
+function gitWorkingDirectory(tokens: string[], i: number, subIndex: number, cwd: string | null): string | null {
+	let dir = cwd;
+	for (let j = i + 1; j < subIndex; j++) {
+		if (tokens[j] !== "-C") continue;
+		const value = tokens[j + 1];
+		if (dir === null || value === undefined || /[$`]/.test(value)) return null;
+		dir = resolvePath(value, dir);
+		j++;
+	}
+	return dir;
+}
+
+/** Whether `git worktree remove` options include `--force`/`-f` (also `-ff`, `-f -f`). */
+function worktreeRemoveForced(args: string[]): boolean {
+	for (const arg of args) {
+		if (arg === "--") return false;
+		if (arg === "--force") return true;
+		if (/^-[A-Za-z]+$/.test(arg) && arg.includes("f")) return true;
+	}
+	return false;
+}
+
+/**
+ * Checks `git worktree remove --force <path>`. Forced removal discards
+ * uncommitted and untracked changes and removes locked worktrees, so it is
+ * allowed only when the worktree is verifiably clean and unlocked (then it has
+ * the same effect as a plain remove). Any state that cannot be checked blocks.
+ */
+function checkWorktreeRemove(args: string[], baseDir: string | null): CheckResult {
+	if (!worktreeRemoveForced(args)) return SAFE;
+	let target: string | undefined;
+	let afterDashes = false;
+	for (const arg of args) {
+		if (!afterDashes && arg === "--") {
+			afterDashes = true;
+			continue;
+		}
+		if (!afterDashes && arg.startsWith("-")) continue;
+		target = arg;
+		break;
+	}
+	const cannotVerify = (why: string) =>
+		block(
+			`git worktree remove --force discards uncommitted and untracked changes and removes locked worktrees — ${why}; commit or stash the changes and use git worktree remove without --force`,
+		);
+	if (target === undefined) return cannotVerify("no worktree path found");
+	if (baseDir === null || /[$`*?[]/.test(target)) {
+		return cannotVerify(`the worktree path ${JSON.stringify(target)} cannot be resolved statically`);
+	}
+	const path = resolvePath(target, baseDir);
+	if (path === null) {
+		return cannotVerify(`the worktree path ${JSON.stringify(target)} cannot be resolved statically`);
+	}
+	if (!existsSync(path)) return cannotVerify(`the worktree ${JSON.stringify(target)} cannot be inspected`);
+	const status = runGit(["-C", path, "status", "--porcelain", "--untracked-files=all"]);
+	if (status === null) return cannotVerify(`the state of ${JSON.stringify(target)} cannot be checked`);
+	if (status !== "") return cannotVerify(`${JSON.stringify(target)} has uncommitted or untracked changes`);
+	const gitDir = runGit(["-C", path, "rev-parse", "--absolute-git-dir"]);
+	if (gitDir === null) return cannotVerify(`the state of ${JSON.stringify(target)} cannot be checked`);
+	if (existsSync(join(gitDir, "locked"))) return cannotVerify(`${JSON.stringify(target)} is locked`);
+	return SAFE;
+}
+
+/**
+ * @param cwd Directory relative worktree paths resolve against; `null` when a
+ *   preceding `cd` made it unknowable.
+ */
+export function checkGit(
+	tokens: string[],
+	i: number,
+	gitGuardsEnabled: boolean,
+	cwd: string | null = process.cwd(),
+): CheckResult {
 	const subIndex = findGitSubcommandIndex(tokens, i);
 	if (subIndex === -1) return SAFE;
 	const sub = tokens[subIndex];
 	const rest = tokens.slice(subIndex + 1);
+
+	if (sub === "worktree" && rest[0] === "remove") {
+		let end = 1;
+		while (end < rest.length && rest[end] && !SHELL_OPERATORS.has(rest[end]!)) end++;
+		const r = checkWorktreeRemove(rest.slice(1, end), gitWorkingDirectory(tokens, i, subIndex, cwd));
+		if (r.dangerous) return r;
+	}
 
 	if (sub === "reset" && rest.includes("--hard")) {
 		return block("git reset --hard discards all local changes");

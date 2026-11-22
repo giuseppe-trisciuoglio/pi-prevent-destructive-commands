@@ -262,7 +262,7 @@ export function checkTokens(
 		}
 
 		if (token === "git") {
-			const r = checkGit(tokens, i, options.gitGuardsEnabled);
+			const r = checkGit(tokens, i, options.gitGuardsEnabled, currentCwd);
 			if (r.dangerous) return r;
 			continue;
 		}

@@ -4,7 +4,9 @@
  *   npx tsx test/git-guards-command-test.ts
  */
 
-import { existsSync, rmSync, writeFileSync, readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { registerGitGuardsCommand } from "../src/git-guards-command";
 import {
@@ -144,5 +146,39 @@ const commandProject = makeProject();
 rmSync(commandProject, { recursive: true, force: true });
 
 rmSync(noFile, { recursive: true, force: true });
+
+// ─── git worktree remove --force (side-effect deletion, issue #45) ───────────
+
+{
+	const repo = realpathSync(mkdtempSync(join(tmpdir(), "pdc-worktree-")));
+	const git = (...args: string[]) =>
+		execFileSync("git", ["-C", repo, ...args], { stdio: ["ignore", "pipe", "ignore"] });
+	git("init", "-q", "-b", "main");
+	git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init");
+	git("worktree", "add", "-q", "wt-clean", "-b", "wt-clean");
+	git("worktree", "add", "-q", "wt-dirty", "-b", "wt-dirty");
+	git("worktree", "add", "-q", "wt-locked", "-b", "wt-locked");
+	git("worktree", "lock", "wt-locked");
+	writeFileSync(join(repo, "wt-dirty", "new.txt"), "untracked");
+
+	for (const guards of [true, false]) {
+		const mode = guards ? "guards on" : "guards off";
+		check(`${mode} → worktree remove --force clean allowed`, isBlocked("git worktree remove --force wt-clean", repo, guards), false);
+		check(`${mode} → worktree remove -f clean allowed`, isBlocked("git worktree remove -f wt-clean", repo, guards), false);
+		check(`${mode} → worktree remove (no force) dirty allowed`, isBlocked("git worktree remove wt-dirty", repo, guards), false);
+		check(`${mode} → worktree remove --force dirty blocked`, isBlocked("git worktree remove --force wt-dirty", repo, guards), true);
+		check(`${mode} → worktree remove -f dirty blocked`, isBlocked("git worktree remove -f wt-dirty", repo, guards), true);
+		check(`${mode} → worktree remove -f -f locked blocked`, isBlocked("git worktree remove -f -f wt-locked", repo, guards), true);
+		check(`${mode} → worktree remove -ff locked blocked`, isBlocked("git worktree remove -ff wt-locked", repo, guards), true);
+		check(`${mode} → worktree remove path --force dirty blocked`, isBlocked("git worktree remove wt-dirty --force", repo, guards), true);
+		check(`${mode} → git -C repo worktree remove -f dirty blocked`, isBlocked(`git -C ${repo} worktree remove -f wt-dirty`, tmpdir(), guards), true);
+		check(`${mode} → cd repo && worktree remove -f clean allowed`, isBlocked(`cd ${repo} && git worktree remove -f wt-clean`, tmpdir(), guards), false);
+		check(`${mode} → worktree remove -f missing path blocked`, isBlocked("git worktree remove -f nope", repo, guards), true);
+		check(`${mode} → worktree remove -f $VAR blocked`, isBlocked("git worktree remove -f $WT", repo, guards), true);
+		check(`${mode} → worktree prune allowed`, isBlocked("git worktree prune", repo, guards), false);
+	}
+
+	rmSync(repo, { recursive: true, force: true });
+}
 
 finishTest("git-guards command");

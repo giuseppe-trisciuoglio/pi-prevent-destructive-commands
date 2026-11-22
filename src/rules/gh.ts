@@ -23,6 +23,59 @@ const GH_SHORT_VALUE_LETTERS = "XHfFqtp";
 /** `gh api` field flags (`-f key=value`, `-F key=value`). */
 const GH_FIELD_FLAGS: ReadonlySet<string> = new Set(["-f", "--raw-field", "-F", "--field"]);
 
+/** `gh` global/persistent options that take a separate value (`-R owner/repo`). */
+const GH_GLOBAL_VALUE_FLAGS: ReadonlySet<string> = new Set(["-R", "--repo"]);
+
+/** `gh pr close` options that take a separate value. */
+const GH_PR_CLOSE_VALUE_FLAGS: ReadonlySet<string> = new Set(["-R", "--repo", "-c", "--comment"]);
+
+/** `gh pr close` short options that take a value (they end a short-option cluster). */
+const GH_PR_CLOSE_SHORT_VALUE_LETTERS = "Rc";
+
+/**
+ * Collects up to `max` positional arguments of the `gh` command in
+ * `tokens[start, end)`, skipping options and the values of `-R`/`--repo`.
+ */
+function ghPositionals(tokens: readonly string[], start: number, end: number, max: number): string[] {
+	const parts: string[] = [];
+	for (let j = start; j < end && parts.length < max; j++) {
+		const token = tokens[j]!;
+		if (token.startsWith("-")) {
+			if (GH_GLOBAL_VALUE_FLAGS.has(token)) j++;
+			continue;
+		}
+		parts.push(token);
+	}
+	return parts;
+}
+
+/**
+ * Whether a `gh pr close` command line asks to delete the head branch:
+ * `-d`, `--delete-branch`, `--delete-branch=<not false>`, or `d` inside a
+ * short-option cluster before any value-taking letter (`-Rd` is `-R d`).
+ */
+function prCloseDeletesBranch(tokens: readonly string[], start: number, end: number): boolean {
+	for (let j = start; j < end; j++) {
+		const token = tokens[j]!;
+		if (token === "--") return false;
+		if (GH_PR_CLOSE_VALUE_FLAGS.has(token)) {
+			j++;
+			continue;
+		}
+		if (token === "--delete-branch") return true;
+		if (token.startsWith("--delete-branch=")) {
+			return token.slice("--delete-branch=".length).toLowerCase() !== "false";
+		}
+		if (/^-[A-Za-z]+$/.test(token)) {
+			for (const letter of token.slice(1)) {
+				if (letter === "d") return true;
+				if (GH_PR_CLOSE_SHORT_VALUE_LETTERS.includes(letter)) break;
+			}
+		}
+	}
+	return false;
+}
+
 /** Whether a GraphQL query text cannot be inspected statically. */
 function isOpaqueQuery(text: string): boolean {
 	return (
@@ -164,6 +217,16 @@ export function checkGh(tokens: string[], i: number, cwd: string = process.cwd()
 	if (tokens[i + 1] === "api") {
 		const r = checkGhGraphql(tokens, i + 2, end, cwd);
 		if (r.dangerous) return r;
+	}
+
+	// `gh pr close --delete-branch`: the PR is not merged, so deleting its head
+	// branch can make commits unreachable. `gh pr merge -d` stays allowed: the
+	// merged branch is reachable from the base.
+	const [noun, verb] = ghPositionals(tokens, i + 1, end, 2);
+	if (noun === "pr" && verb === "close" && prCloseDeletesBranch(tokens, i + 1, end)) {
+		return block(
+			"destructive GitHub CLI operation: gh pr close --delete-branch deletes the head branch of an unmerged PR (its commits may become unreachable) — run gh pr close without -d/--delete-branch and keep or archive the branch",
+		);
 	}
 
 	// `gh <noun> <verb>`: match the longest known destructive subcommand pair.
