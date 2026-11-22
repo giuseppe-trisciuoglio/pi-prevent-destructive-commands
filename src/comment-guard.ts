@@ -15,7 +15,7 @@
  */
 
 import { readFile } from "node:fs/promises";
-import { basename, extname, resolve } from "node:path";
+import { basename, extname, isAbsolute, relative, resolve, sep } from "node:path";
 import { extractHeredocs } from "./heredoc";
 import { splitTokensBySeparators } from "./token-segments";
 import { tokenize } from "./tokenizer";
@@ -129,6 +129,28 @@ function isPythonPath(path: string): boolean {
 	return PYTHON_EXTENSIONS.has(extname(basename(path).toLowerCase()).slice(1));
 }
 
+/** JavaScript/TypeScript: regex literals exist and quoted strings cannot span lines. */
+const JS_EXTENSIONS: ReadonlySet<string> = new Set(["js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts"]);
+
+/** C-family stylesheets: `/` after `(` is a URL path (`url(/a.png)`), never a regex. */
+const NO_REGEX_EXTENSIONS: ReadonlySet<string> = new Set(["scss", "less"]);
+
+/** Scanner options derived from a file path. */
+function scanOptionsForPath(path: string): ScanOptions {
+	const extension = extname(basename(path).toLowerCase()).slice(1);
+	const family = commentFamilyForPath(path);
+	return {
+		regexLiterals: family === "c" && !NO_REGEX_EXTENSIONS.has(extension),
+		singleLineStrings: JS_EXTENSIONS.has(extension),
+		rustLifetimes: extension === "rs",
+	};
+}
+
+/** Comments of `content` for the file at `path`. */
+function commentsForPath(content: string, path: string): SourceComment[] {
+	return extractComments(content, commentFamilyForPath(path)!, isPythonPath(path), scanOptionsForPath(path));
+}
+
 // =============================================================================
 // Comment extraction
 // =============================================================================
@@ -140,23 +162,120 @@ export interface SourceComment {
 	text: string;
 }
 
+export interface ScanOptions {
+	/** Recognise regex literals (`/'/g`) so quotes and `/*` inside them are ignored. */
+	regexLiterals?: boolean;
+	/** Quoted (`'`/`"`) strings cannot contain a raw newline; one that does means the scan desynchronised. */
+	singleLineStrings?: boolean;
+	/** Rust: `'` followed by an identifier and not closed right after (`'static`, `'a`) is a lifetime, not a char literal. */
+	rustLifetimes?: boolean;
+}
+
+/**
+ * Characters after which a `/` starts a regex literal rather than a division.
+ * `}` is excluded: it closes a block as often as an expression (`{a} / 2`, a
+ * JSX attribute before `/>`), and a missed regex only costs the fallback.
+ */
+const REGEX_PRECEDING_CHARACTERS = "(,=:[!&|?{;+-*%>~^";
+
+/** Keywords after which a `/` starts a regex literal. */
+const REGEX_PRECEDING_KEYWORDS: ReadonlySet<string> = new Set([
+	"return",
+	"typeof",
+	"instanceof",
+	"in",
+	"of",
+	"new",
+	"delete",
+	"void",
+	"throw",
+	"case",
+	"do",
+	"else",
+	"yield",
+	"await",
+]);
+
+/**
+ * Line-based fallback used when the string-aware scan desynchronised: only
+ * comments whose marker opens a line (after indentation) are reported, so a
+ * marker in the middle of a line — typically inside a string the scanner lost
+ * track of — never blocks a write.
+ */
+function extractLineComments(content: string, family: CommentFamily, lineOffset = 0): SourceComment[] {
+	const comments: SourceComment[] = [];
+	const lines = content.split("\n");
+	const lineMarkers: Record<CommentFamily, string[]> = {
+		c: ["//"],
+		block: [],
+		hash: ["#"],
+		dash: ["--"],
+		html: [],
+	};
+	const blockMarkers: Record<CommentFamily, [string, string] | undefined> = {
+		c: ["/*", "*/"],
+		block: ["/*", "*/"],
+		hash: undefined,
+		dash: ["/*", "*/"],
+		html: ["<!--", "-->"],
+	};
+	for (let index = 0; index < lines.length; index++) {
+		const trimmed = lines[index]!.trim();
+		const lineMarker = lineMarkers[family].find((marker) => trimmed.startsWith(marker));
+		if (lineMarker !== undefined) {
+			comments.push({ line: lineOffset + index + 1, text: trimmed.slice(lineMarker.length).trim() });
+			continue;
+		}
+		const block = blockMarkers[family];
+		if (block === undefined || !trimmed.startsWith(block[0])) continue;
+		const startLine = lineOffset + index + 1;
+		let text = trimmed.slice(block[0].length);
+		while (!text.includes(block[1]) && index + 1 < lines.length) {
+			index++;
+			text += `\n${lines[index]!}`;
+		}
+		const end = text.indexOf(block[1]);
+		comments.push({ line: startLine, text: (end >= 0 ? text.slice(0, end) : text).trim() });
+	}
+	return comments;
+}
+
 /**
  * Extracts every comment from `content`, skipping string and template
  * literals so markers inside them (an URL like "https://…" inside quotes)
  * are not mistaken for comments. Python triple-quoted strings are skipped
- * for Python files.
+ * for Python files, and C-family regex literals (`/'/g`, `/a\/*b/`) are
+ * skipped when `options.regexLiterals` is set (the default for `"c"`).
+ *
+ * When the scan desynchronises — it ends inside an unterminated string, or a
+ * quoted string spans a line in a language where that is impossible — the
+ * comments found before the failing string are kept, and the lines after the
+ * one where it opened fall back to `extractLineComments`, which never reports
+ * a marker in the middle of a line. A false block costs more than a missed
+ * comment.
  */
 export function extractComments(
 	content: string,
 	family: CommentFamily,
 	python = false,
+	options: ScanOptions = { regexLiterals: family === "c", singleLineStrings: family === "c" },
 ): SourceComment[] {
 	const comments: SourceComment[] = [];
+	/** Offset of each comment's opening marker, parallel to `comments`. */
+	const commentStarts: number[] = [];
 	const length = content.length;
 	let line = 1;
 	let i = 0;
+	/** Offset and line of the first string whose scan desynchronised. */
+	let desync: { offset: number; line: number } | undefined;
+
+	const markDesync = (offset: number, atLine: number): void => {
+		desync ??= { offset, line: atLine };
+	};
 
 	const readString = (quote: string): void => {
+		const start = i;
+		const startLine = line;
 		i++; // opening quote
 		while (i < length) {
 			const ch = content[i]!;
@@ -166,8 +285,70 @@ export function extractComments(
 			}
 			i++;
 			if (ch === quote) return;
-			if (ch === "\n") line++;
+			if (ch === "\n") {
+				line++;
+				if (options.singleLineStrings && quote !== "`") markDesync(start, startLine);
+			}
 		}
+		markDesync(start, startLine);
+	};
+
+	/** Rust lifetime or label (`'static`, `'a`, `'outer:`): an identifier not closed by `'`. */
+	const isRustLifetime = (): boolean => {
+		if (!/[A-Za-z_]/.test(content[i + 1] ?? "")) return false;
+		let k = i + 2;
+		while (k < length && /[A-Za-z0-9_]/.test(content[k]!)) k++;
+		return content[k] !== "'";
+	};
+
+	/** Whether the `/` at `i` is in an expression position, so it opens a regex literal. */
+	const regexAllowedHere = (): boolean => {
+		let k = i - 1;
+		while (k >= 0 && (content[k] === " " || content[k] === "\t" || content[k] === "\r" || content[k] === "\n")) k--;
+		if (k < 0) return true;
+		const previous = content[k]!;
+		const beforePrevious = k > 0 ? content[k - 1]! : "";
+		// `i++ / n`, `i-- / n`: a postfix operator ends an operand.
+		if ((previous === "+" || previous === "-") && beforePrevious === previous) return false;
+		// `total! / n`, `f()! / n`: a TypeScript non-null assertion ends an operand.
+		if (previous === "!" && /[A-Za-z0-9_$)\]]/.test(beforePrevious)) return false;
+		if (REGEX_PRECEDING_CHARACTERS.includes(previous)) return true;
+		if (!/[A-Za-z_$]/.test(previous)) return false;
+		let start = k;
+		while (start > 0 && /[A-Za-z0-9_$]/.test(content[start - 1]!)) start--;
+		if (start > 0 && content[start - 1] === ".") return false;
+		return REGEX_PRECEDING_KEYWORDS.has(content.slice(start, k + 1));
+	};
+
+	/**
+	 * Skips the regex literal starting at `i`: honours `\` escapes and
+	 * `[...]` classes, ends at the unescaped `/`, then skips the flags.
+	 * Returns `false` (leaving `i` unchanged) when the line ends first: then the
+	 * `/` was a division after all.
+	 */
+	const readRegexLiteral = (): boolean => {
+		let k = i + 1;
+		let inClass = false;
+		while (k < length) {
+			const ch = content[k]!;
+			if (ch === "\n") return false;
+			if (ch === "\\") {
+				k += 2;
+				continue;
+			}
+			if (inClass) {
+				if (ch === "]") inClass = false;
+			} else if (ch === "[") {
+				inClass = true;
+			} else if (ch === "/") {
+				k++;
+				while (k < length && /[A-Za-z]/.test(content[k]!)) k++;
+				i = k;
+				return true;
+			}
+			k++;
+		}
+		return false;
 	};
 
 	const readTripleQuotedString = (quote: string): void => {
@@ -183,6 +364,7 @@ export function extractComments(
 	const readLineComment = (markerLength: number): void => {
 		const startLine = line;
 		const start = i;
+		commentStarts.push(start);
 		i += markerLength;
 		while (i < length && content[i] !== "\n") i++;
 		comments.push({ line: startLine, text: content.slice(start + markerLength, i).trim() });
@@ -191,6 +373,7 @@ export function extractComments(
 	const readBlockComment = (startMarker: string, endMarker: string): void => {
 		const startLine = line;
 		const start = i;
+		commentStarts.push(start);
 		i += startMarker.length;
 		while (i < length && !content.startsWith(endMarker, i)) {
 			if (content[i] === "\n") line++;
@@ -204,6 +387,11 @@ export function extractComments(
 	while (i < length) {
 		const ch = content[i]!;
 
+		if (options.rustLifetimes && ch === "'" && isRustLifetime()) {
+			i++;
+			continue;
+		}
+
 		if (ch === "'" || ch === '"' || (family !== "html" && ch === "`")) {
 			if (
 				python &&
@@ -214,6 +402,18 @@ export function extractComments(
 			} else {
 				readString(ch);
 			}
+			continue;
+		}
+
+		if (
+			options.regexLiterals &&
+			ch === "/" &&
+			content[i + 1] !== "/" &&
+			content[i + 1] !== "*" &&
+			content[i + 1] !== ">" &&
+			regexAllowedHere() &&
+			readRegexLiteral()
+		) {
 			continue;
 		}
 
@@ -262,7 +462,15 @@ export function extractComments(
 		i++;
 	}
 
-	return comments;
+	if (desync === undefined) return comments;
+	// Keep what was scanned before the failing string; the rest of its line
+	// is unknown, and later lines only report comments that open a line. A
+	// comment opening the desync line starts before the string, so it is
+	// already among the kept ones.
+	const kept = comments.filter((_, index) => commentStarts[index]! < desync!.offset);
+	const nextLineStart = content.indexOf("\n", desync.offset);
+	if (nextLineStart < 0) return kept;
+	return [...kept, ...extractLineComments(content.slice(nextLineStart + 1), family, desync.line)];
 }
 
 // =============================================================================
@@ -420,12 +628,11 @@ async function violationInFileText(
 	const family = commentFamilyForPath(path);
 	if (!family) return undefined;
 
-	const python = isPythonPath(path);
 	const existing = existingText
-		? new Set(extractComments(existingText, family, python).map(signature))
+		? new Set(commentsForPath(existingText, path).map(signature))
 		: new Set<string>();
 
-	const comment = firstNewComment(extractComments(newText, family, python), existing);
+	const comment = firstNewComment(commentsForPath(newText, path), existing);
 	return comment ? { path, line: comment.line, comment: comment.text } : undefined;
 }
 
@@ -437,15 +644,9 @@ function violationInAddedText(
 	const family = commentFamilyForPath(path);
 	if (!family) return undefined;
 
-	const python = isPythonPath(path);
-	const existing = new Set(
-		extractComments(removedLines.join("\n") + "\n", family, python).map(signature),
-	);
+	const existing = new Set(commentsForPath(removedLines.join("\n") + "\n", path).map(signature));
 
-	const comment = firstNewComment(
-		extractComments(addedLines.join("\n") + "\n", family, python),
-		existing,
-	);
+	const comment = firstNewComment(commentsForPath(addedLines.join("\n") + "\n", path), existing);
 	return comment ? { path, line: comment.line, comment: comment.text } : undefined;
 }
 
@@ -512,23 +713,20 @@ async function violationInBashCommand(command: string, cwd: string): Promise<Com
 
 	for (const segment of segments) {
 		const destinations = bashWriteDestinations(segment);
-		const sourceDestination = destinations.find((destination) =>
-			Boolean(commentFamilyForPath(destination)),
+		const sourceDestination = destinations.find(
+			(destination) => Boolean(commentFamilyForPath(destination)) && isInsideProject(destination, cwd),
 		);
 		if (!sourceDestination) continue;
 
-		const family = commentFamilyForPath(sourceDestination)!;
-		const python = isPythonPath(sourceDestination);
-
 		for (const body of bodies) {
-			const comment = firstNewComment(extractComments(body, family, python), new Set());
+			const comment = firstNewComment(commentsForPath(body, sourceDestination), new Set());
 			if (comment) {
 				return { path: sourceDestination, line: comment.line, comment: comment.text };
 			}
 		}
 
 		for (const argument of echoArguments(segment)) {
-			const comment = firstNewComment(extractComments(argument, family, python), new Set());
+			const comment = firstNewComment(commentsForPath(argument, sourceDestination), new Set());
 			if (comment) {
 				return { path: sourceDestination, line: comment.line, comment: comment.text };
 			}
@@ -539,6 +737,17 @@ async function violationInBashCommand(command: string, cwd: string): Promise<Com
 }
 
 // ─── Entry point ─────────────────────────────────────────────────────────────
+
+/**
+ * Whether `path` lies inside the project working directory. Files outside it
+ * (throwaway scripts under the system temp directory) are not project source,
+ * so the comment guard does not apply to them.
+ */
+function isInsideProject(path: string, cwd: string): boolean {
+	const rel = relative(resolve(cwd), resolve(cwd, path));
+	if (rel === "") return true;
+	return !(rel === ".." || rel.startsWith(`..${sep}`) || rel.startsWith("../") || isAbsolute(rel));
+}
 
 /**
  * Returns the first comment the tool call would introduce into a source
@@ -554,6 +763,7 @@ export async function findNewSourceComments(
 		const path = input.path;
 		const content = input.content;
 		if (typeof path !== "string" || typeof content !== "string") return undefined;
+		if (!isInsideProject(path, cwd)) return undefined;
 		return violationInFileText(path, content, await readTextIfExists(resolve(cwd, path)));
 	}
 
@@ -561,6 +771,7 @@ export async function findNewSourceComments(
 		const path = input.path;
 		const edits = input.edits;
 		if (typeof path !== "string" || !Array.isArray(edits)) return undefined;
+		if (!isInsideProject(path, cwd)) return undefined;
 		if (commentFamilyForPath(path) === undefined) return undefined;
 
 		for (const edit of edits) {
@@ -571,13 +782,10 @@ export async function findNewSourceComments(
 
 			const existing =
 				typeof oldText === "string"
-					? new Set(extractComments(oldText, commentFamilyForPath(path)!, isPythonPath(path)).map(signature))
+					? new Set(commentsForPath(oldText, path).map(signature))
 					: new Set<string>();
 
-			const comment = firstNewComment(
-				extractComments(newText, commentFamilyForPath(path)!, isPythonPath(path)),
-				existing,
-			);
+			const comment = firstNewComment(commentsForPath(newText, path), existing);
 			if (comment) return { path, line: comment.line, comment: comment.text };
 		}
 
@@ -591,6 +799,7 @@ export async function findNewSourceComments(
 		if (patch === undefined) return undefined;
 
 		for (const file of parsePatchSections(patch)) {
+			if (!isInsideProject(file.path, cwd)) continue;
 			const violation = violationInAddedText(file.path, file.addedLines, file.removedLines);
 			if (violation) return violation;
 		}
