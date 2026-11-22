@@ -490,8 +490,6 @@ function programText(token: string): string {
  */
 function checkProgramLiteral(literal: string, cwd: string, boundaryCwd: string, depth: number): CheckResult {
 	if (literal.includes("://")) return SAFE;
-	// Separators such as `split($0, a, "/")` or `FS="/"` are not paths.
-	if (/^[\s/]*$/.test(literal)) return SAFE;
 	if (/\s/.test(literal) && literal.includes("/")) return checkCommandWorkdir(literal, cwd, depth + 1);
 	if (looksLikePath(literal)) return checkPathInsideWorkdir(literal, cwd, boundaryCwd, "read");
 	return SAFE;

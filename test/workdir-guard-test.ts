@@ -187,6 +187,17 @@ case_("grep -r --include='*.ts' '/x/' .", false, "grep --include= value split by
 case_("grep -r --include='*.ts' x /etc", true, "grep --include= search path outside remains blocked");
 case_("grep --exclude-from= /etc/x y js/a.js", true, "grep empty --exclude-from= value is still checked");
 case_("grep --regexp= /etc/passwd", true, "grep empty --regexp= next token is still checked");
+case_("deno eval --import-map='/etc/x.json' 'x'", true, "deno eval split --import-map= value is checked");
+case_("deno eval --config='/etc/x.json' 'x'", true, "deno eval split --config= value is checked");
+case_("deno eval --lock /etc/lock 'x'", true, "deno eval --lock value is checked");
+case_("deno eval --env-file /etc/x 'Deno.readTextFileSync(\"/etc/passwd\")'", true, "deno eval --env-file value is checked");
+case_("deno eval --tsconfig /etc/x 'x'", true, "deno eval --tsconfig value is checked");
+case_("deno eval --unknown-opt /etc/x 'x'", true, "deno eval unknown option: no program classified, generic analysis");
+case_("deno eval --ext ts \"console.log(/a/.test('b'))\"", false, "deno eval --ext code regex is not a path");
+case_("perl -e 'unlink \"/\"'", true, "slash literal passed to unlink is checked");
+case_("python3 -c \"os.listdir('/ ')\"", true, "slash literal passed to os.listdir is checked");
+case_("node -e \"require('fs').rmSync('/')\"", true, "slash literal passed to rmSync is checked");
+case_("ruby -e 'FileUtils.rm_rf(\"/\")'", true, "slash literal passed to FileUtils.rm_rf is checked");
 
 case_(
 	"git add -A && git commit -m \"feat(conversazioni): lista /conversazioni su viewport < 768px\"",

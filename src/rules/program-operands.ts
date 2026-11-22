@@ -164,8 +164,40 @@ const OPTIONAL_ATTACHED_LETTERS: Record<string, string> = { perl: "iFlx0CdD" };
 /** perl `-l[octal]` / `-0[octal|xHEX]`: the optional value is digits only, the cluster goes on (`-lne`). */
 const PERL_NUMERIC_VALUE: Record<string, RegExp> = { l: /^[0-7]*/, "0": /^(?:x[0-9a-fA-F]*|[0-7]*)/ };
 
-/** `deno eval` options that take a separate value token. */
-const DENO_EVAL_VALUE_OPTIONS = new Set(["--ext", "--import-map", "-c", "--config", "--location", "--cert", "--seed", "--log-level", "-L", "--v8-flags"]);
+/** `deno eval` options that take a separate value token (the value stays unclassified, so it is checked). */
+const DENO_VALUE_OPTIONS = new Set([
+	"--ext", "--import-map", "-c", "--config", "--location", "--cert", "--seed", "--log-level", "-L",
+	"--v8-flags", "--lock", "--env-file", "--tsconfig", "--node-modules-dir", "--conditions", "--preload",
+	"--import", "--inspect", "--inspect-brk", "--inspect-wait", "--reload", "-r", "--check", "--unsafely-ignore-certificate-errors",
+]);
+
+/** `deno eval` options known to take no separate value. */
+const DENO_BOOLEAN_OPTIONS = new Set([
+	"-q", "--quiet", "-A", "--allow-all", "-p", "--print", "-T", "--ts", "--no-check", "--no-remote", "--no-npm",
+	"--no-config", "--no-lock", "--cached-only", "--frozen", "--unstable", "--env", "--no-prompt",
+]);
+
+function isKnownDenoBoolean(option: string): boolean {
+	return DENO_BOOLEAN_OPTIONS.has(option) || /^--(?:allow|deny|unstable)-[a-z-]+$/.test(option);
+}
+
+/**
+ * Index of the first operand after the deno options starting at `j`, or `-1`
+ * when an option is not recognised (its value could be the next token).
+ */
+function skipDenoOptions(tokens: readonly string[], j: number): number {
+	while (j < tokens.length && tokens[j]!.startsWith("-") && !SHELL_OPERATORS.has(tokens[j]!)) {
+		const token = tokens[j]!;
+		const eq = token.indexOf("=");
+		const option = eq > 0 ? token.slice(0, eq) : token;
+		if (!DENO_VALUE_OPTIONS.has(option) && !isKnownDenoBoolean(option)) return -1;
+		// The tokenizer splits `--opt='v'` into `--opt=` and `v`: `v` is the value.
+		if (eq > 0 && eq === token.length - 1) j++;
+		else if (eq < 0 && DENO_VALUE_OPTIONS.has(option)) j++;
+		j++;
+	}
+	return j;
+}
 
 function specFor(command: string): { spec: ToolSpec; name: string } | null {
 	if (command === "grep" || command === "egrep" || command === "fgrep") return { spec: GREP_SPEC, name: "grep" };
@@ -190,15 +222,11 @@ export function classifyProgramOperands(tokens: readonly string[], index: number
 
 	// `deno eval "code"`: the operand after `eval` is a JS program.
 	if (command === "deno") {
-		let j = index + 1;
-		while (j < tokens.length && tokens[j]!.startsWith("-")) j++;
-		if (tokens[j] === "eval") {
-			j++;
-			while (j < tokens.length && tokens[j]!.startsWith("-") && !SHELL_OPERATORS.has(tokens[j]!)) {
-				// `--opt=value` is one token; a value option consumes the next token (left unclassified, so checked).
-				if (!tokens[j]!.includes("=") && DENO_EVAL_VALUE_OPTIONS.has(tokens[j]!)) j++;
-				j++;
-			}
+		let j = skipDenoOptions(tokens, index + 1);
+		if (j >= 0 && tokens[j] === "eval") {
+			j = skipDenoOptions(tokens, j + 1);
+			// Unrecognised option: classify nothing, every token gets the generic analysis.
+			if (j < 0) return { patternIndices, programIndices };
 			if (j < tokens.length && tokens[j] && !SHELL_OPERATORS.has(tokens[j]!)) programIndices.set(j, "js");
 			return { patternIndices, programIndices };
 		}
@@ -338,6 +366,12 @@ function scanQuoteLike(program: string, start: number, open: string): { value: s
 	return null;
 }
 
+/** A literal made only of slashes/whitespace (a separator such as `split(s, "/")`). */
+const SLASH_ONLY = /^[\s/]*$/;
+
+/** Filesystem calls whose argument is a path even when it is just `/`. */
+const FS_CALL = /\b(?:rm|rmSync|rmdir|rmdirSync|rmtree|rm_rf|rm_r|unlink|unlinkSync|listdir|readdir|readdirSync|scandir|walk|open|opendir|chdir|chmod|chown|remove|removedirs|truncate|writeFile|writeFileSync|readFile|readFileSync|glob|Dir|File\.\w+|FileUtils\.\w+|os\.\w+|shutil\.\w+)\s*\(?\s*$/;
+
 /** Calls whose first string argument is a regular expression, not a path. */
 const REGEX_CALL = /(?:\bre\.(?:sub|subn|match|fullmatch|search|compile|findall|finditer|split)|\bRegExp|\bRegexp\.new)\s*\(\s*$/;
 
@@ -364,7 +398,7 @@ export function extractProgramLiterals(program: string, language: ProgramLanguag
 			if (match !== null) {
 				const body = scanQuoteLike(program, i + match[0].length, match[1]!);
 				if (body === null) return null;
-				literals.push(body.value);
+				if (!SLASH_ONLY.test(body.value) || FS_CALL.test(program.slice(0, i))) literals.push(body.value);
 				i = body.end;
 				continue;
 			}
@@ -400,7 +434,9 @@ export function extractProgramLiterals(program: string, language: ProgramLanguag
 			j++;
 		}
 		if (!closed) return null;
-		if (!precededByRegexCall) literals.push(value);
+		const before = program.slice(0, i - (prefixMatch?.[1]?.length ?? 0));
+		const separator = SLASH_ONLY.test(value) && !FS_CALL.test(before);
+		if (!precededByRegexCall && !separator) literals.push(value);
 		i = j + delimiter.length;
 	}
 	return literals;

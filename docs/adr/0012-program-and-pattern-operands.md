@@ -35,12 +35,17 @@ Input files and path-valued options stay unclassified and are still checked.
   (unless `-f`/`-e`/`--source` supplied it), `awk -e/--source`, `node`/`bun`
   `-e/--eval/-p/--print` (also `-pe`/`-ep`), `python* -c`, `ruby -e`,
   `perl -e/-E` (including clusters such as `-ne`, `-lne`, `-lane`, `-wle`:
-  perl `-l`/`-0` take only digits), and `deno eval [--ext ts|-c file ...] <code>`. A program is not a
+  perl `-l`/`-0` take only digits), and `deno eval [--ext ts|-c file ...] <code>`
+  (deno options are matched against known boolean and value lists; value
+  tokens, also split `--opt='v'`, stay checked; any unrecognised option
+  disables the classification so the generic analysis applies). A program is not a
   path, but it can name files, so its **string literals** are extracted and
   checked: a literal containing whitespace and `/` is analyzed as a shell
   command line (it may be passed to `system()`, `os.system`, backticks), other
   path-like literals are checked as paths, URLs and literals made only of
-  slashes (separators such as `split($0, a, "/")`, `FS="/"`) are skipped.
+  slashes (separators such as `split($0, a, "/")`, `FS="/"`) are skipped,
+  unless they are the argument of a filesystem call (`unlink "/"`,
+  `os.listdir('/')`, `rmSync('/')`, `FileUtils.rm_rf("/")`, ...).
   Perl `q()`/`qq{}`/`qw[]`/`qx<>` and ruby `%q()`/`%Q`/`%w`/`%()` quote-like
   bodies are extracted as literals too; an unterminated one triggers the
   fallback below. Regex literals,
