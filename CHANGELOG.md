@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Deletions performed as a side effect of high-level commands are now covered. `gh pr close --delete-branch` (and `-d`, `--delete-branch=true`, `-dc msg`, with `-R owner/repo` anywhere) is blocked, because the PR is unmerged and its commits may become unreachable. `git worktree remove --force` / `-f` / `-ff` / `-f -f` is blocked when the worktree has uncommitted or untracked changes, is locked, or its state cannot be checked; a clean, unlocked worktree is still removable. `gh pr merge --delete-branch` and `git worktree prune` stay allowed. See issue #45 and `docs/adr/0011-side-effect-deletions.md`.
+
 ## [1.4.9] - 2026-11-22
 
 ### Fixed

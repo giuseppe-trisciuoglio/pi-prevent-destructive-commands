@@ -99,6 +99,14 @@ const SAFE_COMMANDS: string[] = [
 	"xh api.github.com/repos/o/r",
 	`curl -d '{"query":"query { viewer { login } }"}' https://api.github.com/graphql`,
 	"gh api repos/o/r; echo -X $M",
+	// `gh pr merge -d` deletes a branch that is already reachable from the base.
+	"gh pr merge 31 --merge --delete-branch",
+	"gh pr merge 31 -d --squash",
+	"gh pr close 31",
+	"gh pr close 31 --comment 'closing'",
+	"gh pr close 31 -c -d",
+	"gh pr close 31 -Rd",
+	"gh pr close 31 --delete-branch=false",
 ];
 
 async function main(): Promise<void> {
@@ -121,6 +129,15 @@ async function main(): Promise<void> {
 		"gh label delete bug",
 		"gh run delete 12345",
 		"echo hi && gh api -X DELETE repos/owner/name",
+		// Side-effect deletion: closing an unmerged PR and deleting its branch.
+		"gh pr close 31 --delete-branch",
+		"gh pr close 31 -d",
+		"gh pr close -d 31",
+		"gh pr close 31 --delete-branch=true",
+		"gh pr close 31 -dc 'superseded'",
+		"gh pr close 31 -R owner/repo -d",
+		"gh -R owner/repo pr close 31 --delete-branch",
+		"gh pr close 31 --comment 'bye' -d",
 	]) {
 		const r = checkCommand(command, cwd);
 		assert.equal(r.dangerous, true, `expected block: ${command}`);
