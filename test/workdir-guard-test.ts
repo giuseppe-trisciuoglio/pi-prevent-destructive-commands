@@ -149,6 +149,44 @@ case_("ruby -e 'File.read(\"/etc/passwd\")'", true, "ruby string literal path ou
 case_("perl -ne 'print' /etc/passwd", true, "perl input file outside remains blocked");
 case_("python3 /etc/x.py", true, "interpreter script file outside remains blocked");
 case_("node -e \"s.replace(/'/g, 'x'); fs.readFileSync('/etc/passwd')\"", true, "unparseable program falls back to token analysis");
+// Issue #46 review findings.
+case_("rg --files /etc", true, "rg --files takes no pattern: the path outside is checked");
+case_("rg --files ../other", true, "rg --files parent path outside is checked");
+case_("rg --type-list /etc", true, "rg --type-list takes no pattern");
+case_("rg --files src", false, "rg --files path inside is allowed");
+case_("ag -g foo /etc", true, "ag -g supplies the pattern: the path outside is checked");
+case_("ag -g foo src", false, "ag -g path inside is allowed");
+case_("perl -e 'unlink q(/etc/x)'", true, "perl q() literal path outside is checked");
+case_("perl -e 'unlink qq{/etc/x}'", true, "perl qq{} literal path outside is checked");
+case_("perl -e 'print q(hello)'", false, "perl q() literal without a path");
+case_("ruby -e 'IO.read(%q(/etc/passwd))'", true, "ruby %q() literal path outside is checked");
+case_("ruby -e 'IO.read(%(/etc/passwd))'", true, "ruby %() literal path outside is checked");
+case_("ruby -e 'puts %w[a b]'", false, "ruby %w[] literal without a path");
+case_("node -pe \"require('fs').readFileSync('/etc/passwd')\"", true, "node -pe program literal is checked");
+case_("node -ep \"require('fs').readFileSync('/etc/passwd')\"", true, "node -ep program literal is checked");
+case_("node -p \"require('fs').readFileSync('/etc/passwd')\"", true, "node -p program literal is checked");
+case_("node -pe \"'a'.replace(/x/,'y')\"", false, "node -pe regex literal is not a path");
+case_("deno eval --ext ts \"Deno.readTextFileSync('/etc/passwd')\"", true, "deno eval --ext value is skipped, code is checked");
+case_("deno eval --ext ts \"'a'.replace(/x/,'y')\"", false, "deno eval --ext code regex is not a path");
+case_("deno eval -c /etc/deno.json \"1\"", true, "deno eval -c config path outside is checked");
+case_("awk '{n=split($0,a,\"/\")}' js/a.js", false, "awk split separator literal is not a path");
+case_("awk 'BEGIN{FS=\"/\"}'", false, "awk FS separator literal is not a path");
+case_("python3 -c \"print('a/b'.split('/'))\"", false, "python separator literal is not a path");
+case_("ruby -e 'puts \"/\"'", false, "ruby slash literal is not a path");
+case_("perl -e 'print join(\"/\",1,2)'", false, "perl join separator literal is not a path");
+case_("awk 'BEGIN{print \"/etc/passwd\"}'", true, "awk real path literal is still checked");
+case_("perl -nle 'print if /x/' js/a.js", false, "perl -nle program is not a path");
+case_("perl -lne 'print if /x/' js/a.js", false, "perl -lne program is not a path");
+case_("perl -lane 'print if /x/' js/a.js", false, "perl -lane program is not a path");
+case_("perl -wle 'print if /x/' js/a.js", false, "perl -wle program is not a path");
+case_("perl -nle 'print if /x/' /etc/passwd", true, "perl -nle input file outside remains blocked");
+case_("perl -l -e 'open(F,\"/etc/x\")'", true, "perl -l -e program literal is checked");
+case_("rg --color never '/api/'", false, "rg --color value is skipped before the pattern");
+case_("rg --color never x /etc", true, "rg --color search path outside remains blocked");
+case_("grep -r --include='*.ts' '/x/' .", false, "grep --include= value split by the tokenizer");
+case_("grep -r --include='*.ts' x /etc", true, "grep --include= search path outside remains blocked");
+case_("grep --exclude-from= /etc/x y js/a.js", true, "grep empty --exclude-from= value is still checked");
+case_("grep --regexp= /etc/passwd", true, "grep empty --regexp= next token is still checked");
 
 case_(
 	"git add -A && git commit -m \"feat(conversazioni): lista /conversazioni su viewport < 768px\"",

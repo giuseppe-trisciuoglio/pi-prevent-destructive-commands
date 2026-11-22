@@ -22,18 +22,28 @@ Input files and path-valued options stay unclassified and are still checked.
 
 - **Patterns (never checked):** the first positional operand of
   `grep`/`egrep`/`fgrep`/`rg`/`ag` unless `-e`/`--regexp` or `-f`/`--file`
-  supplied it; the values of `-e`/`--regexp` (also attached), `rg -r/--replace`,
-  `awk -F`. Option values are tracked per tool (`-m N`, `-A N`, `--glob X`, ...)
-  so the pattern position is found correctly. `-f`/`--file`, `--exclude-from`,
+  supplied it, and unless the mode takes no pattern (`rg --files`,
+  `rg --type-list`, `ag -g PATTERN`: every positional is then a path); the
+  values of `-e`/`--regexp` (also attached), `rg -r/--replace`, `awk -F`. Option values are tracked per tool (`-m N`, `-A N`, `--glob X`, ...)
+  so the pattern position is found correctly (rg value options include
+  `--color`, `--colors`, `--hyperlink-format`, ...). The tokenizer splits
+  `--include='*.ts'` into `--include=` and `*.ts`, so a known value option
+  ending in `=` consumes the next token as its value; that value stays checked
+  (an empty `--regexp=` cannot be told apart). `-f`/`--file`, `--exclude-from`,
   `--ignore-file`, `--pre` values remain paths.
 - **Inline programs:** the first positional of `awk`/`gawk`/`mawk`/`nawk`
   (unless `-f`/`-e`/`--source` supplied it), `awk -e/--source`, `node`/`bun`
-  `-e/--eval/-p/--print`, `python* -c`, `ruby -e`, `perl -e/-E` (including
-  clusters such as `-ne`, `-lne`), and `deno eval <code>`. A program is not a
+  `-e/--eval/-p/--print` (also `-pe`/`-ep`), `python* -c`, `ruby -e`,
+  `perl -e/-E` (including clusters such as `-ne`, `-lne`, `-lane`, `-wle`:
+  perl `-l`/`-0` take only digits), and `deno eval [--ext ts|-c file ...] <code>`. A program is not a
   path, but it can name files, so its **string literals** are extracted and
   checked: a literal containing whitespace and `/` is analyzed as a shell
   command line (it may be passed to `system()`, `os.system`, backticks), other
-  path-like literals are checked as paths, URLs are skipped. Regex literals,
+  path-like literals are checked as paths, URLs and literals made only of
+  slashes (separators such as `split($0, a, "/")`, `FS="/"`) are skipped.
+  Perl `q()`/`qq{}`/`qw[]`/`qx<>` and ruby `%q()`/`%Q`/`%w`/`%()` quote-like
+  bodies are extracted as literals too; an unterminated one triggers the
+  fallback below. Regex literals,
   division and code outside strings are ignored. The first string argument of
   `re.sub/match/search/compile/...`, `RegExp(...)` and `Regexp.new(...)` is a
   regex and is skipped. When the literal scan ends inside an unterminated

@@ -95,9 +95,16 @@ const RG_SPEC: ToolSpec = {
 		"--context-separator",
 		"--field-match-separator",
 		"--field-context-separator",
+		"--color",
+		"--hyperlink-format",
+		"--dfa-size-limit",
+		"--regex-size-limit",
+		"--hostname-bin",
+		"--generate",
 	]),
 	longPatternOptions: new Set(["--regexp", "--replace", "--context-separator"]),
-	suppliesProgram: (flag) => ["e", "f", "--regexp", "--file"].includes(flag),
+	// With `--files` / `--type-list` rg takes no pattern: every positional is a path.
+	suppliesProgram: (flag) => ["e", "f", "--regexp", "--file", "--files", "--type-list", "--help"].includes(flag),
 	positionalProgram: true,
 };
 
@@ -117,7 +124,9 @@ const AG_SPEC: ToolSpec = {
 		"--pager",
 	]),
 	longPatternOptions: new Set(["--file-search-regex", "--ignore", "--ignore-dir"]),
-	suppliesProgram: () => false,
+	// `-g PATTERN` lists files matching PATTERN: no positional pattern follows.
+	// (`-G` only filters the files searched for the positional pattern.)
+	suppliesProgram: (flag) => flag === "g",
 	positionalProgram: true,
 };
 
@@ -152,6 +161,12 @@ const PERL_SPEC = interpreterSpec("perl", "eEIMmxFiC0ldD", "eE", [], []);
 /** Value-taking letters that consume the rest of the cluster but may be empty (optional value). */
 const OPTIONAL_ATTACHED_LETTERS: Record<string, string> = { perl: "iFlx0CdD" };
 
+/** perl `-l[octal]` / `-0[octal|xHEX]`: the optional value is digits only, the cluster goes on (`-lne`). */
+const PERL_NUMERIC_VALUE: Record<string, RegExp> = { l: /^[0-7]*/, "0": /^(?:x[0-9a-fA-F]*|[0-7]*)/ };
+
+/** `deno eval` options that take a separate value token. */
+const DENO_EVAL_VALUE_OPTIONS = new Set(["--ext", "--import-map", "-c", "--config", "--location", "--cert", "--seed", "--log-level", "-L", "--v8-flags"]);
+
 function specFor(command: string): { spec: ToolSpec; name: string } | null {
 	if (command === "grep" || command === "egrep" || command === "fgrep") return { spec: GREP_SPEC, name: "grep" };
 	if (command === "rg") return { spec: RG_SPEC, name: "rg" };
@@ -179,7 +194,11 @@ export function classifyProgramOperands(tokens: readonly string[], index: number
 		while (j < tokens.length && tokens[j]!.startsWith("-")) j++;
 		if (tokens[j] === "eval") {
 			j++;
-			while (j < tokens.length && tokens[j]!.startsWith("-") && !SHELL_OPERATORS.has(tokens[j]!)) j++;
+			while (j < tokens.length && tokens[j]!.startsWith("-") && !SHELL_OPERATORS.has(tokens[j]!)) {
+				// `--opt=value` is one token; a value option consumes the next token (left unclassified, so checked).
+				if (!tokens[j]!.includes("=") && DENO_EVAL_VALUE_OPTIONS.has(tokens[j]!)) j++;
+				j++;
+			}
 			if (j < tokens.length && tokens[j] && !SHELL_OPERATORS.has(tokens[j]!)) programIndices.set(j, "js");
 			return { patternIndices, programIndices };
 		}
@@ -220,6 +239,13 @@ export function classifyProgramOperands(tokens: readonly string[], index: number
 			const eq = token.indexOf("=");
 			const option = eq > 0 ? token.slice(0, eq) : token;
 			if (spec.suppliesProgram(option)) supplied = true;
+			if (eq > 0 && eq === token.length - 1 && spec.longValueOptions.has(option) && j + 1 < tokens.length) {
+				// The tokenizer splits `--include='*.ts'` into `--include=` and `*.ts`: the next token is
+				// the value. It is left unclassified (still checked as a path), since `--regexp= /x`
+				// cannot be told apart from it.
+				j++;
+				continue;
+			}
 			if (eq > 0) {
 				if (spec.longPatternOptions.has(option)) markPattern(j, option);
 				continue;
@@ -235,6 +261,13 @@ export function classifyProgramOperands(tokens: readonly string[], index: number
 			for (let k = 0; k < letters.length; k++) {
 				const letter = letters[k]!;
 				if (!spec.shortValueLetters.includes(letter)) continue;
+				const numeric = name === "perl" ? PERL_NUMERIC_VALUE[letter] : undefined;
+				if (numeric !== undefined) {
+					k += numeric.exec(letters.slice(k + 1))![0].length;
+					continue;
+				}
+				// node: `-pe CODE` / `-ep CODE`: the program is the value of the last of `e`/`p`.
+				if (name === "node" && "ep".includes(letter) && k + 1 < letters.length && "ep".includes(letters[k + 1]!)) continue;
 				if (spec.suppliesProgram(letter)) supplied = true;
 				const attached = letters.slice(k + 1);
 				if (attached === "") {
@@ -274,6 +307,37 @@ const LITERAL_QUOTES: Record<ProgramLanguage, string> = {
 	perl: "'\"`",
 };
 
+/** Quote-like string operators: perl `q(...)`/`qq{...}`/`qw[...]`/`qx<...>`, ruby `%q(...)`/`%w[...]`/`%(...)`. */
+const QUOTE_LIKE: Partial<Record<ProgramLanguage, RegExp>> = {
+	perl: /q[qwx]?\s*([^\w\s])/y,
+	ruby: /%[qQwWiIx]?([^\w\s=])/y,
+};
+
+const CLOSING_BRACKET: Record<string, string> = { "(": ")", "[": "]", "{": "}", "<": ">" };
+
+/** Scans a quote-like body opened by `open` at `start`; `null` when it is unterminated. */
+function scanQuoteLike(program: string, start: number, open: string): { value: string; end: number } | null {
+	const close = CLOSING_BRACKET[open] ?? open;
+	let depth = 1;
+	let value = "";
+	for (let j = start; j < program.length; j++) {
+		const character = program[j]!;
+		if (character === "\\" && j + 1 < program.length) {
+			value += program[j + 1];
+			j++;
+			continue;
+		}
+		if (character === close) {
+			depth--;
+			if (depth === 0) return { value, end: j + 1 };
+		} else if (character === open) {
+			depth++;
+		}
+		value += character;
+	}
+	return null;
+}
+
 /** Calls whose first string argument is a regular expression, not a path. */
 const REGEX_CALL = /(?:\bre\.(?:sub|subn|match|fullmatch|search|compile|findall|finditer|split)|\bRegExp|\bRegexp\.new)\s*\(\s*$/;
 
@@ -292,6 +356,18 @@ export function extractProgramLiterals(program: string, language: ProgramLanguag
 		if (language === "python" && character === "#") {
 			while (i < program.length && program[i] !== "\n") i++;
 			continue;
+		}
+		const quoteLike = QUOTE_LIKE[language];
+		if (quoteLike !== undefined && (language !== "perl" || i === 0 || !/[\w$@%&]/.test(program[i - 1]!))) {
+			quoteLike.lastIndex = i;
+			const match = quoteLike.exec(program);
+			if (match !== null) {
+				const body = scanQuoteLike(program, i + match[0].length, match[1]!);
+				if (body === null) return null;
+				literals.push(body.value);
+				i = body.end;
+				continue;
+			}
 		}
 		if (!quotes.includes(character)) {
 			i++;
