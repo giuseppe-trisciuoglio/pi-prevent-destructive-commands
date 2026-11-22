@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The comment guard no longer reports phantom comments after a regex literal containing a quote. `s.replace(/'/g, 'x')` followed by `'js/gimmicks/*.js'`, and `/a\/*b/`, are no longer blocked: C-family regex literals are recognised (expression position, escapes, character classes, flags), and when the string scan desynchronises (unterminated string, or a JS/TS quoted string spanning a line) only comments that open a line are reported. Files outside the project working directory (e.g. `/tmp` scripts) are no longer checked. See issue #49 and `docs/adr/0013-comment-guard-regex-literals.md`.
+
 - The workdir boundary guard no longer treats program and pattern operands starting with `/` as paths. `awk '/^<<<<<<</,/^>>>>>>>/' f`, `grep '/api/' f`, `grep -e/--regexp`, `rg '/api/' src`, `sed -n '/start/,/end/p' f` (ranges, `+N`, `\%re%`, multiple `-e`), `perl -ne 'print if /x/'`, `node -e "x.replace(/a/,'b')"` and `python3 -c "re.sub(r'/x/', ...)"` are allowed. Input files, `-f`/`--file` program and pattern files, interpreter script files, and string literals inside inline programs that name outside paths (`open('/etc/passwd')`, `system("cat /etc/passwd")`) are still blocked, as are `rg --files`/`--type-list` and `ag -g` search paths, `node -pe` programs, `deno eval --ext ts` code, and perl/ruby quote-like literals (`q(/etc/x)`, `%q(/etc/x)`). Separator literals made only of slashes (`split($0,a,"/")`) are not paths. Exempt tools: `grep`/`egrep`/`fgrep`, `rg`, `ag`, `awk`/`gawk`/`mawk`/`nawk`, `sed`, `node`/`bun`, `deno eval`, `python*`, `ruby`, `perl`. See issue #46 and `docs/adr/0012-program-and-pattern-operands.md`.
 
 ### Fixed

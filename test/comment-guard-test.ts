@@ -1,3 +1,4 @@
+import { tmpdir } from "node:os";
 import assert from "node:assert/strict";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -350,6 +351,81 @@ runIsolatedTest(
 			{ command: "cat a.ts > /dev/null" },
 			root,
 			"reading commands must not be affected",
+		);
+
+		// ─── Regex literals and desync fail-safe (issue #49) ────────────────
+
+		const noComments = (source: string, message: string) =>
+			assert.deepEqual(extractComments(source, "c").map((c) => c.text), [], message);
+		noComments(
+			"s.replace(/'/g, 'x');\nconst a = 'see js/gimmicks/*.js for kinds';",
+			"a quote inside a regex literal must not open a string",
+		);
+		noComments(
+			"s.replace(/\"/g, '');\nconst b = \"src/*.ts list\";",
+			"a double quote inside a regex literal must not open a string",
+		);
+		noComments("const r = a / b; const c = 'js/*.js';", "division followed by a string");
+		noComments("s.split(\"'\");\nconst a = 'see js/gimmicks/*.js for kinds';", "split with a quote string");
+		noComments("const r = /a\\/*b/;", "a regex body containing /* is not a comment");
+		noComments("const t = `${s.replace(/'/g, '')} js/*.js`;", "a template literal containing a regex");
+		noComments("const r = /[/'*]/.test(s);\nconst p = 'a/*b';", "a slash and quote inside a regex class");
+		noComments("if (ok) return /'/.test(s);\nconst p = 'x/*y';", "a regex literal after return");
+		assert.deepEqual(
+			extractComments("const x = a / b / c; // real\nconst y = /re/; /* also real */", "c").map((c) => c.text),
+			["real", "also real"],
+			"division and regex disambiguation keeps real comments",
+		);
+		assert.deepEqual(
+			extractComments("x = /re/g // after regex", "c").map((c) => c.text),
+			["after regex"],
+			"a comment after a regex literal is still found",
+		);
+		assert.deepEqual(
+			extractComments("const a = 'unterminated /* x */\n// own line\nconst b = 1;", "c").map((c) => c.text),
+			["own line"],
+			"after a desync only comments that open a line are reported",
+		);
+
+		await expectAllowed(
+			"write",
+			{
+				path: "build.js",
+				content:
+					"const q = (s) => `'${s.replace(/'/g, \"'\\\\''\")}'`;\nconst notes = ['see js/gimmicks/*.js for kinds', 'R1/R17'];\n",
+			},
+			root,
+			"the reported build.js pattern must not be blocked",
+		);
+		await expectBlocked(
+			"write",
+			{ path: "regex.ts", content: "const r = /a/g;\n// explanation\nexport { r };\n" },
+			root,
+			"a real comment after a regex literal must still be blocked",
+		);
+		await expectAllowed(
+			"write",
+			{ path: "styles.scss", content: ".a { background: url(/img/a.png); }\n" },
+			root,
+			"a URL path in a stylesheet is not a regex",
+		);
+		await expectBlocked(
+			"write",
+			{ path: "styles.scss", content: ".a { background: url(/img/a.png); } /* note */\n" },
+			root,
+			"a stylesheet comment after a URL path must still be blocked",
+		);
+		await expectAllowed(
+			"write",
+			{ path: join(tmpdir(), `pdc-comment-${process.pid}.js`), content: "// throwaway script\nconsole.log(1);\n" },
+			root,
+			"files outside the working directory are not project source",
+		);
+		await expectAllowed(
+			"bash",
+			{ command: `echo "// note" > ${join(tmpdir(), "pdc-out.ts")}` },
+			root,
+			"bash writes outside the working directory are not checked",
 		);
 
 		// ─── Tools without file text ────────────────────────────────────────
