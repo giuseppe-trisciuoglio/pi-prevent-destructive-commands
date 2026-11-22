@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The workdir boundary guard no longer treats API endpoint arguments as filesystem paths. `gh api /repos/o/r/pulls`, `sonar api get "/api/ce/activity?project=x"` (also when the endpoint comes from a variable assigned in the same command), and HTTPie/xh (`http GET /api/health`) are allowed. File arguments of these clients are still checked: `gh api --input <file>`, and now also `gh api -F key=@file` and HTTPie `field=@file` / `field@file` items. See issue #41 and `docs/adr/0008-api-endpoint-arguments.md`.
+
 ## [1.4.8] - 2026-11-22
 
 ### Fixed

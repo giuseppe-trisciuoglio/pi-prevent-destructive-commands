@@ -254,6 +254,29 @@ if (checkPathInsideWorkdir("/etc/passwd", CWD, CWD).dangerous) {
 	console.error("FAIL checkPathInsideWorkdir outside blocked");
 }
 
+// Issue #41: API endpoint arguments are not filesystem paths.
+case_("sonar api get \"/api/ce/activity?project=x\"", false, "sonar api endpoint");
+case_("EP=\"/api/ce/activity?project=x\"; sonar api get \"$EP\"", false, "endpoint via variable");
+case_("gh api /repos/o/r/pulls", false, "gh api endpoint");
+case_("gh api -X GET --paginate /repos/o/r/pulls -q '.[].title'", false, "gh api endpoint after flags");
+case_("gh api /repos/o/r/pulls | jq '.[0]'", false, "gh api endpoint piped");
+case_("gh api \"/repos/$OWNER/r/issues\"", false, "gh api endpoint with variable");
+case_("http GET /api/health", false, "httpie method + endpoint");
+case_("xh --timeout 5 localhost:3000/api/health", false, "xh endpoint after value flag");
+case_("curl http://localhost:3000/api/health", false, "curl URL");
+case_("gh api /repos/x --input /etc/passwd", true, "gh api --input outside");
+case_("gh api /repos/x --input=/etc/passwd", true, "gh api --input= outside");
+case_("gh api /repos/x -F body=@/etc/passwd", true, "gh api -F @file outside");
+case_("gh api /repos/x -F body=@./notes.md", false, "gh api -F @file inside");
+case_("http POST /api/upload file@/etc/passwd", true, "httpie file item outside");
+case_("http POST /api/upload data=@/etc/passwd", true, "httpie embedded file outside");
+case_("http POST /api/upload name=value", false, "httpie data item");
+case_("http --cert /etc/ssl/key.pem GET /api/x", true, "httpie cert file outside");
+case_("EP=\"/etc/passwd\"; gh api /x; cat \"$EP\"", true, "assignment not feeding an endpoint still checked");
+case_("gh api \"/repos/$(cat /etc/passwd)\"", true, "command substitution in endpoint");
+case_("sonar api get --data /etc/passwd /api/x", true, "sonar non-strict form not exempted");
+case_("gh pr view /etc/passwd", true, "other gh subcommands unaffected");
+
 if (failed > 0) {
 	console.error(`\n${failed} test(s) failed`);
 	process.exit(1);
