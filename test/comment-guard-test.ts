@@ -428,6 +428,139 @@ runIsolatedTest(
 			"bash writes outside the working directory are not checked",
 		);
 
+		// Review findings on PR #52: JSX self-closing tags (finding 1).
+		await expectBlocked(
+			"write",
+			{ path: "jsx1.tsx", content: "const e = <Input value={v} /> // real\n" },
+			root,
+			"a comment after a JSX self-closing tag with an attribute must be blocked",
+		);
+		await expectBlocked(
+			"write",
+			{ path: "jsx2.jsx", content: "const e = <Comp onClick={() => go()} /> // real\n" },
+			root,
+			"a comment after a JSX self-closing tag with an arrow attribute must be blocked",
+		);
+		await expectBlocked(
+			"write",
+			{ path: "jsx3.tsx", content: "const e = <A b={1} /> /* real */\n" },
+			root,
+			"a block comment after a JSX self-closing tag must be blocked",
+		);
+		await expectBlocked(
+			"write",
+			{ path: "jsx4.tsx", content: "const e = (\n\t<div>\n\t\t<A b={1} />{/* real */}\n\t</div>\n);\n" },
+			root,
+			"a JSX comment right after a self-closing tag must be blocked",
+		);
+		await expectAllowed(
+			"write",
+			{ path: "jsx5.tsx", content: "const e = <A b={1} />;\nconst p = 'src/*.ts';\n" },
+			root,
+			"a JSX self-closing tag followed by a glob string must pass",
+		);
+		await expectAllowed(
+			"write",
+			{ path: "jsx6.tsx", content: "const e = <a href={url} />;\nconst u = 'https://x.y/a';\n" },
+			root,
+			"a JSX self-closing tag followed by a URL string must pass",
+		);
+
+		// Finding 2: a desync keeps the comments found before it.
+		await expectBlocked(
+			"write",
+			{ path: "a.rs", content: "let x = 1; // real\nfn f() -> &'static str { \"a\" }\n" },
+			root,
+			"a comment before a Rust lifetime must be blocked",
+		);
+		await expectBlocked(
+			"write",
+			{ path: "b.rs", content: "fn f<'a>(s: &'a str) -> &'a str { s } // real\n" },
+			root,
+			"a comment after Rust lifetimes on the same line must be blocked",
+		);
+		await expectAllowed(
+			"write",
+			{ path: "c.rs", content: "fn f() -> &'static str { \"see src/*.rs\" }\nlet c = 'x';\nlet q = '\\'';\n" },
+			root,
+			"Rust lifetimes and char literals must not desync the scan",
+		);
+		assert.deepEqual(
+			extractComments("let x = 1; // real\nconst s = 'unterminated", "c").map((c) => c.text),
+			["real"],
+			"a desync at EOF keeps the comments scanned before the failing string",
+		);
+		assert.deepEqual(
+			extractComments("/* before */ const s = 'open\n// own line\nconst t = 'a/*b';\n", "c").map((c) => [c.line, c.text]),
+			[
+				[1, "before"],
+				[2, "own line"],
+			],
+			"a desync on a multi-line JS string keeps earlier comments and falls back only after it, without duplicates",
+		);
+		assert.deepEqual(
+			extractComments("// a\n// b\nconst s = 'x\n// c", "c").map((c) => [c.line, c.text]),
+			[
+				[1, "a"],
+				[2, "b"],
+				[4, "c"],
+			],
+			"fallback line numbers stay absolute and scanned comments are not duplicated",
+		);
+		await expectBlocked(
+			"write",
+			{ path: "desync.ts", content: "const x = 1; // real\nconst s = 'open\nnext';\n" },
+			root,
+			"a comment before a desynchronising JS string must be blocked",
+		);
+		await expectAllowed(
+			"write",
+			{ path: "desync2.ts", content: "const x = 1;\nconst s = 'open\nnext /* not */ x';\n" },
+			root,
+			"a mid-line marker after a desync must still pass",
+		);
+
+		// Finding 3: division after postfix operators and non-null assertions.
+		for (const [source, label] of [
+			["const r = i++ / count; // real", "i++"],
+			["const r = i-- / count; // real", "i--"],
+			["total! / count; // real", "total!"],
+			["const r = f()! / count; // real", "f()!"],
+			["const r = a[0]! / count; // real", "a[0]!"],
+			["const x = {a} / 2; // real", "{a}"],
+		] as const) {
+			assert.deepEqual(
+				extractComments(source, "c").map((c) => c.text),
+				["real"],
+				`a division after ${label} must not hide the trailing comment`,
+			);
+		}
+		await expectBlocked(
+			"write",
+			{ path: "div.ts", content: "const r = i++ / count; // real\n" },
+			root,
+			"a comment after a division following i++ must be blocked",
+		);
+		noComments("const ok = !/'/.test(s);\nconst p = 'a/*b';", "a regex after a prefix ! is still a regex");
+		noComments("x = a + +/'/.test(s).length;\nconst p = 'a/*b';", "a regex after a unary + is still a regex");
+		noComments("if (a) { /'/.test(s); }\nconst p = 'a/*b';", "a regex after { is still a regex");
+
+		// Finding 5: a `..foo` directory is inside the project.
+		mkdirSync(join(root, "..foo"), { recursive: true });
+		await expectBlocked(
+			"write",
+			{ path: "..foo/x.ts", content: "// real\nexport {};\n" },
+			root,
+			"a file under a ..foo directory is project source",
+		);
+		await expectAllowed(
+			"write",
+			{ path: "../outside-pdc.ts", content: "// real\nexport {};\n" },
+			root,
+			"a file in the parent directory is outside the project",
+		);
+		rmSync(join(root, "..foo"), { recursive: true, force: true });
+
 		// ─── Tools without file text ────────────────────────────────────────
 
 		await expectAllowed("rename_refactoring", { pathInProject: "svc.ts" }, root, "renames carry no new text");

@@ -15,7 +15,7 @@
  */
 
 import { readFile } from "node:fs/promises";
-import { basename, extname, relative, resolve } from "node:path";
+import { basename, extname, isAbsolute, relative, resolve, sep } from "node:path";
 import { extractHeredocs } from "./heredoc";
 import { splitTokensBySeparators } from "./token-segments";
 import { tokenize } from "./tokenizer";
@@ -142,6 +142,7 @@ function scanOptionsForPath(path: string): ScanOptions {
 	return {
 		regexLiterals: family === "c" && !NO_REGEX_EXTENSIONS.has(extension),
 		singleLineStrings: JS_EXTENSIONS.has(extension),
+		rustLifetimes: extension === "rs",
 	};
 }
 
@@ -166,10 +167,16 @@ export interface ScanOptions {
 	regexLiterals?: boolean;
 	/** Quoted (`'`/`"`) strings cannot contain a raw newline; one that does means the scan desynchronised. */
 	singleLineStrings?: boolean;
+	/** Rust: `'` followed by an identifier and not closed right after (`'static`, `'a`) is a lifetime, not a char literal. */
+	rustLifetimes?: boolean;
 }
 
-/** Characters after which a `/` starts a regex literal rather than a division. */
-const REGEX_PRECEDING_CHARACTERS = "(,=:[!&|?{};+-*%>~^";
+/**
+ * Characters after which a `/` starts a regex literal rather than a division.
+ * `}` is excluded: it closes a block as often as an expression (`{a} / 2`, a
+ * JSX attribute before `/>`), and a missed regex only costs the fallback.
+ */
+const REGEX_PRECEDING_CHARACTERS = "(,=:[!&|?{;+-*%>~^";
 
 /** Keywords after which a `/` starts a regex literal. */
 const REGEX_PRECEDING_KEYWORDS: ReadonlySet<string> = new Set([
@@ -195,7 +202,7 @@ const REGEX_PRECEDING_KEYWORDS: ReadonlySet<string> = new Set([
  * marker in the middle of a line — typically inside a string the scanner lost
  * track of — never blocks a write.
  */
-function extractLineComments(content: string, family: CommentFamily): SourceComment[] {
+function extractLineComments(content: string, family: CommentFamily, lineOffset = 0): SourceComment[] {
 	const comments: SourceComment[] = [];
 	const lines = content.split("\n");
 	const lineMarkers: Record<CommentFamily, string[]> = {
@@ -216,12 +223,12 @@ function extractLineComments(content: string, family: CommentFamily): SourceComm
 		const trimmed = lines[index]!.trim();
 		const lineMarker = lineMarkers[family].find((marker) => trimmed.startsWith(marker));
 		if (lineMarker !== undefined) {
-			comments.push({ line: index + 1, text: trimmed.slice(lineMarker.length).trim() });
+			comments.push({ line: lineOffset + index + 1, text: trimmed.slice(lineMarker.length).trim() });
 			continue;
 		}
 		const block = blockMarkers[family];
 		if (block === undefined || !trimmed.startsWith(block[0])) continue;
-		const startLine = index + 1;
+		const startLine = lineOffset + index + 1;
 		let text = trimmed.slice(block[0].length);
 		while (!text.includes(block[1]) && index + 1 < lines.length) {
 			index++;
@@ -242,8 +249,10 @@ function extractLineComments(content: string, family: CommentFamily): SourceComm
  *
  * When the scan desynchronises — it ends inside an unterminated string, or a
  * quoted string spans a line in a language where that is impossible — the
- * result falls back to `extractLineComments`, which never reports a marker in
- * the middle of a line. A false block costs more than a missed comment.
+ * comments found before the failing string are kept, and the lines after the
+ * one where it opened fall back to `extractLineComments`, which never reports
+ * a marker in the middle of a line. A false block costs more than a missed
+ * comment.
  */
 export function extractComments(
 	content: string,
@@ -252,12 +261,21 @@ export function extractComments(
 	options: ScanOptions = { regexLiterals: family === "c", singleLineStrings: family === "c" },
 ): SourceComment[] {
 	const comments: SourceComment[] = [];
+	/** Offset of each comment's opening marker, parallel to `comments`. */
+	const commentStarts: number[] = [];
 	const length = content.length;
 	let line = 1;
 	let i = 0;
-	let reliable = true;
+	/** Offset and line of the first string whose scan desynchronised. */
+	let desync: { offset: number; line: number } | undefined;
+
+	const markDesync = (offset: number, atLine: number): void => {
+		desync ??= { offset, line: atLine };
+	};
 
 	const readString = (quote: string): void => {
+		const start = i;
+		const startLine = line;
 		i++; // opening quote
 		while (i < length) {
 			const ch = content[i]!;
@@ -269,10 +287,18 @@ export function extractComments(
 			if (ch === quote) return;
 			if (ch === "\n") {
 				line++;
-				if (options.singleLineStrings && quote !== "`") reliable = false;
+				if (options.singleLineStrings && quote !== "`") markDesync(start, startLine);
 			}
 		}
-		reliable = false;
+		markDesync(start, startLine);
+	};
+
+	/** Rust lifetime or label (`'static`, `'a`, `'outer:`): an identifier not closed by `'`. */
+	const isRustLifetime = (): boolean => {
+		if (!/[A-Za-z_]/.test(content[i + 1] ?? "")) return false;
+		let k = i + 2;
+		while (k < length && /[A-Za-z0-9_]/.test(content[k]!)) k++;
+		return content[k] !== "'";
 	};
 
 	/** Whether the `/` at `i` is in an expression position, so it opens a regex literal. */
@@ -281,6 +307,11 @@ export function extractComments(
 		while (k >= 0 && (content[k] === " " || content[k] === "\t" || content[k] === "\r" || content[k] === "\n")) k--;
 		if (k < 0) return true;
 		const previous = content[k]!;
+		const beforePrevious = k > 0 ? content[k - 1]! : "";
+		// `i++ / n`, `i-- / n`: a postfix operator ends an operand.
+		if ((previous === "+" || previous === "-") && beforePrevious === previous) return false;
+		// `total! / n`, `f()! / n`: a TypeScript non-null assertion ends an operand.
+		if (previous === "!" && /[A-Za-z0-9_$)\]]/.test(beforePrevious)) return false;
 		if (REGEX_PRECEDING_CHARACTERS.includes(previous)) return true;
 		if (!/[A-Za-z_$]/.test(previous)) return false;
 		let start = k;
@@ -333,6 +364,7 @@ export function extractComments(
 	const readLineComment = (markerLength: number): void => {
 		const startLine = line;
 		const start = i;
+		commentStarts.push(start);
 		i += markerLength;
 		while (i < length && content[i] !== "\n") i++;
 		comments.push({ line: startLine, text: content.slice(start + markerLength, i).trim() });
@@ -341,6 +373,7 @@ export function extractComments(
 	const readBlockComment = (startMarker: string, endMarker: string): void => {
 		const startLine = line;
 		const start = i;
+		commentStarts.push(start);
 		i += startMarker.length;
 		while (i < length && !content.startsWith(endMarker, i)) {
 			if (content[i] === "\n") line++;
@@ -353,6 +386,11 @@ export function extractComments(
 
 	while (i < length) {
 		const ch = content[i]!;
+
+		if (options.rustLifetimes && ch === "'" && isRustLifetime()) {
+			i++;
+			continue;
+		}
 
 		if (ch === "'" || ch === '"' || (family !== "html" && ch === "`")) {
 			if (
@@ -372,6 +410,7 @@ export function extractComments(
 			ch === "/" &&
 			content[i + 1] !== "/" &&
 			content[i + 1] !== "*" &&
+			content[i + 1] !== ">" &&
 			regexAllowedHere() &&
 			readRegexLiteral()
 		) {
@@ -423,7 +462,15 @@ export function extractComments(
 		i++;
 	}
 
-	return reliable ? comments : extractLineComments(content, family);
+	if (desync === undefined) return comments;
+	// Keep what was scanned before the failing string; the rest of its line
+	// is unknown, and later lines only report comments that open a line. A
+	// comment opening the desync line starts before the string, so it is
+	// already among the kept ones.
+	const kept = comments.filter((_, index) => commentStarts[index]! < desync!.offset);
+	const nextLineStart = content.indexOf("\n", desync.offset);
+	if (nextLineStart < 0) return kept;
+	return [...kept, ...extractLineComments(content.slice(nextLineStart + 1), family, desync.line)];
 }
 
 // =============================================================================
@@ -698,7 +745,8 @@ async function violationInBashCommand(command: string, cwd: string): Promise<Com
  */
 function isInsideProject(path: string, cwd: string): boolean {
 	const rel = relative(resolve(cwd), resolve(cwd, path));
-	return rel === "" || (!rel.startsWith("..") && !rel.startsWith("/"));
+	if (rel === "") return true;
+	return !(rel === ".." || rel.startsWith(`..${sep}`) || rel.startsWith("../") || isAbsolute(rel));
 }
 
 /**
