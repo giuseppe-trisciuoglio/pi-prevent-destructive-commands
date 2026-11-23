@@ -10,6 +10,7 @@
  */
 
 import { SHELL_OPERATORS } from "../config";
+import { isAttachedValue } from "../tokenizer";
 
 /** Language of an inline program, used to extract its string literals. */
 export type ProgramLanguage = "awk" | "js" | "python" | "ruby" | "perl";
@@ -327,7 +328,8 @@ function classifyOperands(tokens: readonly string[], index: number, consumeSplit
 				// cannot be told apart from it (`rg --color= foo /etc` has an empty value). Both readings are
 				// classified (consumed as the value, or left as an operand) and only operands exempt in both
 				// are skipped. An option-like next token is consumed only in the first reading.
-				if (consumeSplitValue) j++;
+				// A quoted value written attached (`--include='*.ts'`) is unambiguous: always the value.
+				if (consumeSplitValue || isAttachedValue(tokens, j + 1)) j++;
 				continue;
 			}
 			if (eq > 0) {

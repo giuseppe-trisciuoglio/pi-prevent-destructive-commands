@@ -91,13 +91,16 @@ Input files and path-valued options stay unclassified and are still checked.
     and the next token is the program, so it is scanned. Unknown options still
     fall back to the generic analysis (the program is then not scanned; this
     limitation predates #53).
-  - A split `--opt=` is ambiguous (an empty value or a quoted value cannot be
-    told apart after tokenizing). The operands are classified under both
-    readings (the next token consumed as the value, or left as an operand) and
-    an operand is exempt only when both agree. So `rg --color= foo /etc`,
-    `rg --color= '' /etc` and `rg --color= '*' /etc/x` are blocked. Cost:
-    `grep -r --include='*.ts' '/x/' .` is now blocked as well (a false
-    positive; write the pattern before the option or use `--include=*.ts`).
+  - A separated `--opt= v` is ambiguous (an empty value followed by an operand
+    cannot be told apart from a value after tokenizing). The operands are
+    classified under both readings (the next token consumed as the value, or
+    left as an operand) and an operand is exempt only when both agree. So
+    `rg --color= foo /etc`, `rg --color= '' /etc` and `rg --color= '*' /etc/x`
+    are blocked. A quoted value written attached (`--include='*.ts'`,
+    `--color=""`) is unambiguous: the tokenizer records, per token array, which
+    quoted tokens followed an attached `--opt=` (`isAttachedValue`, kept by
+    `sliceTokens`), and such a token is always the value, so
+    `grep -r --include='*.ts' '/x/' .` stays allowed.
   - Shell expansion: an unquoted or double-quoted operand holding `$(`, a
     backtick or `${` is expanded by the shell before the program runs, so it is
     not opaque program or pattern text and gets the generic analysis, for every
@@ -108,7 +111,7 @@ Input files and path-valued options stay unclassified and are still checked.
     `node -e "$(cat /etc/passwd)"`.
   - By-design blocked-to-allowed changes (the operand is now code, as with
     `node -e '…'` before): programs without a path-like string literal passed
-    through a recognised form, such as `node --stack-size 1 -e 'x; cat /etc/passwd'`,
+    through a recognised form (`--eval`/`--print` spellings, `-p -e CODE`, `deno eval` booleans and `--`), such as `node --stack-size 1 -e 'x; cat /etc/passwd'`,
     `node --eval='$(cat /etc/passwd)'` (single-quoted, so JS code),
     `node -p ../x`-style programs after a value option, `deno eval --vendor '/etc/passwd'`
     and `deno eval -- '/etc/passwd'`. Unknown-option garbage such as

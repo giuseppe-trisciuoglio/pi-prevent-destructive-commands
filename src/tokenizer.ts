@@ -26,6 +26,24 @@ export function isExpandableToken(text: string): boolean {
 	return expandableTokens.has(text);
 }
 
+/** Per token array: indices of quoted tokens attached to a preceding `--opt=` (`--include='*.ts'`). */
+const attachedValues = new WeakMap<readonly string[], Set<number>>();
+
+/** Whether `tokens[index]` is a quoted value written attached to the preceding `--opt=` token. */
+export function isAttachedValue(tokens: readonly string[], index: number): boolean {
+	return attachedValues.get(tokens)?.has(index) ?? false;
+}
+
+/** `tokens.slice(start)`, keeping the attached-value information of the source array. */
+export function sliceTokens(tokens: readonly string[], start: number): string[] {
+	const result = tokens.slice(start);
+	const source = attachedValues.get(tokens);
+	if (source !== undefined) {
+		attachedValues.set(result, new Set([...source].filter((index) => index >= start).map((index) => index - start)));
+	}
+	return result;
+}
+
 /**
  * Tokenizes a shell command string into an array of tokens.
  *
@@ -39,6 +57,8 @@ export function isExpandableToken(text: string): boolean {
  */
 export function tokenize(input: string): string[] {
 	const tokens: string[] = [];
+	const attached = new Set<number>();
+	attachedValues.set(tokens, attached);
 	let current = "";
 	let i = 0;
 
@@ -79,6 +99,7 @@ export function tokenize(input: string): string[] {
 
 		// Single-quoted string: everything until closing quote, no escaping
 		if (ch === "'") {
+			if (/^-.*=$/.test(current)) attached.add(tokens.length + 1);
 			flush();
 			i++;
 			const start = i;
@@ -92,6 +113,7 @@ export function tokenize(input: string): string[] {
 
 		// Double-quoted string: supports \ escapes
 		if (ch === '"') {
+			if (/^-.*=$/.test(current)) attached.add(tokens.length + 1);
 			flush();
 			i++;
 			let quoted = "";

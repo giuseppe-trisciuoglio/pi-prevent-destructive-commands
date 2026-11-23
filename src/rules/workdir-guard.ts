@@ -15,7 +15,7 @@ import {
 	WRITE_REDIRECT_OPERATORS,
 } from "../config";
 import { hasGlobMagic, hasShellVariable } from "./glob";
-import { isExpandableToken, resetExpandableTokens } from "../tokenizer";
+import { isExpandableToken, resetExpandableTokens, sliceTokens } from "../tokenizer";
 import { classifyProgramOperands, extractProgramLiterals, type ProgramLanguage } from "./program-operands";
 import { isOutsideCwd, isSkillPath, isSystemTempRoot, type PathAccess, resolvePath } from "./path-utils";
 import { type CheckResult, SAFE, block } from "./types";
@@ -628,7 +628,7 @@ function checkCommandTokens(
 
 		if (DELEGATION_COMMANDS.has(token)) {
 			if (i + 1 < tokens.length) {
-				const r = checkCommandTokens(tokens.slice(i + 1), currentCwd, depth + 1, boundaryCwd);
+				const r = checkCommandTokens(sliceTokens(tokens, i + 1), currentCwd, depth + 1, boundaryCwd);
 				if (r.dangerous) return r;
 			}
 			continue;
