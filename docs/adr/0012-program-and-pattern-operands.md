@@ -63,6 +63,15 @@ Input files and path-valued options stay unclassified and are still checked.
   handling. Each `-e` script is classified separately.
 - Interpreter script files (`node /x.js`, `python3 /x.py`) and their input
   files remain checked.
+- **Markup literals (issue #55):** the literal scanner already honours `\`
+  escapes. A literal with whitespace and `/` is normally re-analyzed as a shell
+  command line, which misreads markup (`<script src="a.js"></script>`, where
+  `</script>` is a redirect from `/script`). Well-formed tags (a name followed
+  by whitespace, `>` or `/>`; so `</etc/passwd>` is not a tag) are neutralised
+  first: each is replaced by its attribute values with names and quotes
+  removed. The normal analysis then runs unchanged on the result, so nothing
+  outside tags is hidden and attribute paths stay checked. No shortcut skips
+  the command analysis.
 
 ## Consequences
 

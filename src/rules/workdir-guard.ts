@@ -483,6 +483,22 @@ function programText(token: string): string {
 	return token;
 }
 
+/** A well-formed HTML/XML tag: the name is followed by whitespace, `>` or `/>`, so `</etc/passwd>` is not one. */
+const MARKUP_TAG = /<\/?[A-Za-z][\w:-]*(?:\s[^<>]*)?\/?>/g;
+
+/**
+ * Replaces each well-formed tag by its attribute values (names and quotes
+ * removed), so `<script src="a.js"></script>` becomes ` a.js  ` and its
+ * closing tag is not read as a redirect from `/script`. Everything outside
+ * tags, and every attribute value, stays visible to the normal analysis.
+ */
+function neutraliseMarkup(literal: string): string {
+	return literal.replace(MARKUP_TAG, (tag) => {
+		const attrs = tag.replace(/^<\/?[A-Za-z][\w:-]*/, "").replace(/\/?>$/, "");
+		return ` ${attrs.replace(/[\w:-]+=/g, " ").replace(/["']/g, " ")} `;
+	});
+}
+
 /**
  * Checks one string literal of an inline program: literals holding a shell
  * command line (whitespace and a `/`) are analyzed as commands, other
@@ -490,6 +506,7 @@ function programText(token: string): string {
  */
 function checkProgramLiteral(literal: string, cwd: string, boundaryCwd: string, depth: number): CheckResult {
 	if (literal.includes("://")) return SAFE;
+	literal = neutraliseMarkup(literal);
 	if (/\s/.test(literal) && literal.includes("/")) return checkCommandWorkdir(literal, cwd, depth + 1);
 	if (looksLikePath(literal)) return checkPathInsideWorkdir(literal, cwd, boundaryCwd, "read");
 	return SAFE;
