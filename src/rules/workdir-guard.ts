@@ -483,9 +483,21 @@ function programText(token: string): string {
 	return token;
 }
 
-/** An HTML/XML-like tag inside a literal, and shell metacharacters that rule out the markup reading. */
-const MARKUP_TAG = /<\/?[A-Za-z][^<>]*>/;
-const SHELL_META = /[;|&$`\n]/;
+/** A well-formed HTML/XML tag: the name is followed by whitespace, `>` or `/>`, so `</etc/passwd>` is not one. */
+const MARKUP_TAG = /<\/?[A-Za-z][\w:-]*(?:\s+[^<>]*?)?\/?>/g;
+
+/**
+ * Replaces each well-formed tag by its attribute values (names and quotes
+ * removed), so `<script src="a.js"></script>` becomes ` a.js  ` and its
+ * closing tag is not read as a redirect from `/script`. Everything outside
+ * tags, and every attribute value, stays visible to the normal analysis.
+ */
+function neutraliseMarkup(literal: string): string {
+	return literal.replace(MARKUP_TAG, (tag) => {
+		const attrs = tag.replace(/^<\/?[A-Za-z][\w:-]*/, "").replace(/\/?>$/, "");
+		return ` ${attrs.replace(/[\w:-]+=/g, " ").replace(/["']/g, " ")} `;
+	});
+}
 
 /**
  * Checks one string literal of an inline program: literals holding a shell
@@ -494,19 +506,7 @@ const SHELL_META = /[;|&$`\n]/;
  */
 function checkProgramLiteral(literal: string, cwd: string, boundaryCwd: string, depth: number): CheckResult {
 	if (literal.includes("://")) return SAFE;
-	if (MARKUP_TAG.test(literal) && !SHELL_META.test(literal)) {
-		// Markup such as `<script src="a.js"></script>` is not a command line
-		// (`</script>` would tokenize as a redirect from "/script"): only words
-		// that start like a path are checked.
-		for (const raw of literal.split(/\s+/)) {
-			const word = raw.replace(/^[\w:-]+=["']?/, "");
-			if (/^(?:\/|~|\.\.)/.test(word) && looksLikePath(word)) {
-				const r = checkPathInsideWorkdir(word, cwd, boundaryCwd, "read");
-				if (r.dangerous) return r;
-			}
-		}
-		return SAFE;
-	}
+	literal = neutraliseMarkup(literal);
 	if (/\s/.test(literal) && literal.includes("/")) return checkCommandWorkdir(literal, cwd, depth + 1);
 	if (looksLikePath(literal)) return checkPathInsideWorkdir(literal, cwd, boundaryCwd, "read");
 	return SAFE;
