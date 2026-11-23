@@ -627,7 +627,55 @@ runIsolatedTest(
 			{ input: "*** Begin Patch\n*** Update File: a.py\n@@ context\n v1 = 1\n+# note\n*** End Patch" },
 			lineRoot,
 		);
-		assert.equal(patchNoHeader?.line, 1, "a patch without a hunk header keeps the added-text line");
+		assert.equal(patchNoHeader?.line, 3, "a bare @@ hunk is located by its context");
+		const lineOf = async (tool: string, input: Record<string, unknown>) =>
+			(await findNewSourceComments(tool, input, lineRoot))?.line;
+		const openai = (body: string) => ({ input: `*** Begin Patch\n*** Update File: a.py\n${body}\n*** End Patch` });
+		assert.equal(await lineOf("apply_patch", openai("@@\n v2 = 2\n+# c")), 4, "bare @@ is located in the file");
+		assert.equal(
+			await lineOf("apply_patch", openai("@@ v9 = 9\n v10 = 10\n+# c")),
+			12,
+			"@@ context text narrows the search",
+		);
+		assert.equal(await lineOf("apply_patch", openai("@@\n zz = 0\n+# c")), 1, "no match falls back");
+		writeFileSync(join(lineRoot, "dup.py"), "a = 1\na = 1\n");
+		assert.equal(
+			(await findNewSourceComments("apply_patch", { input: "*** Begin Patch\n*** Update File: dup.py\n@@\n a = 1\n+# c\n*** End Patch" }, lineRoot))?.line,
+			1,
+			"an ambiguous match falls back",
+		);
+		assert.equal(
+			await lineOf("apply_patch", {
+				input: "--- a/a.py\n+++ b/a.py\n@@ -3,3 +3,4 @@\n v3 = 3\n-v4 = 4\n+v4 = 5\n\\ No newline at end of file\n+# c\n",
+			}),
+			5,
+			"a no-newline marker is not a context line",
+		);
+		assert.equal(
+			await lineOf("apply_patch", { input: "--- a/a.py\n+++ b/a.py\n@@ -3,2 +3,3 @@\n a\n--- x\n+# c\n b\n" }),
+			4,
+			"a removed line starting with -- is not a file header",
+		);
+
+		writeFileSync(join(lineRoot, "crlf.py"), "a = 1\r\nb = 2\r\nc = 3\r\n");
+		assert.equal(
+			(await findNewSourceComments("edit", { path: "crlf.py", edits: [{ oldText: "b = 2\nc = 3", newText: "b = 2\nc = 3  # c" }] }, lineRoot))?.line,
+			3,
+			"CRLF files are matched with LF oldText",
+		);
+
+		if (process.platform !== "win32") {
+			const { spawnSync } = await import("node:child_process");
+			const fifo = join(lineRoot, "pipe.py");
+			if (spawnSync("mkfifo", [fifo]).status === 0) {
+				const result = await Promise.race([
+					findNewSourceComments("edit", { path: "pipe.py", edits: [{ oldText: "a", newText: "a  # c" }] }, lineRoot),
+					new Promise<string>((resolveTimeout) => setTimeout(() => resolveTimeout("timeout"), 3000)),
+				]);
+				assert.notEqual(result, "timeout", "a FIFO target must not block the guard");
+				assert.equal((result as { line: number }).line, 1);
+			}
+		}
 		rmSync(lineRoot, { recursive: true, force: true });
 
 		// ─── Tools without file text ────────────────────────────────────────
