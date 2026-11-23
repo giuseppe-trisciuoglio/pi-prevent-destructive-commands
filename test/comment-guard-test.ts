@@ -676,6 +676,63 @@ runIsolatedTest(
 				assert.equal((result as { line: number }).line, 1);
 			}
 		}
+		writeFileSync(join(lineRoot, "blank.py"), "a=1\n\nb=2\nc=3\n");
+		assert.equal(
+			(await findNewSourceComments("apply_patch", { input: "--- a/blank.py\n+++ b/blank.py\n@@ -1,3 +1,4 @@\n a=1\n\n b=2\n+# c\n c=3\n\n" }, lineRoot))?.line,
+			4,
+			"a stripped blank context line counts in +start numbering",
+		);
+		assert.equal(
+			(await findNewSourceComments("apply_patch", { input: "*** Begin Patch\n*** Update File: blank.py\n@@\n a=1\n\n b=2\n+# c\n c=3\n\n*** End Patch" }, lineRoot))?.line,
+			4,
+			"a stripped blank context line counts in the bare @@ search",
+		);
+		assert.equal(
+			(await findNewSourceComments("apply_patch", { input: "--- a/blank.py\n+++ b/blank.py\n@@ -1,3 +1,4 @@\n a=1\n+# c\n\n\n" }, lineRoot))?.line,
+			2,
+			"trailing blank lines shift nothing",
+		);
+		assert.equal(
+			(await findNewSourceComments("apply_patch", { input: "--- a/blank.py\n+++ b/blank.py\n@@ -0 +99999999999999999999 @@\n+# c\n" }, lineRoot))?.line,
+			1,
+			"an absurd +start falls back",
+		);
+
+		await expectAllowed(
+			"apply_patch",
+			{ input: "--- a/a.py\n+++ b/a.py\n@@ -1,1 +1,1 @@\n--- old\n+-- old\n" },
+			lineRoot,
+			"a removed '-- old' re-added unchanged is not a new comment (sql)",
+		);
+		writeFileSync(join(lineRoot, "q.sql"), "-- old\nselect 1;\n");
+		await expectAllowed(
+			"apply_patch",
+			{ input: "--- a/q.sql\n+++ b/q.sql\n@@ -1,2 +1,2 @@\n--- old\n+-- old\n select 1;\n" },
+			lineRoot,
+			"a removed '-- old' re-added unchanged is allowed",
+		);
+		await expectBlocked(
+			"apply_patch",
+			{ input: "--- a/q.sql\n+++ b/q.sql\n@@ -1,1 +1,2 @@\n select 1;\n+++ -- c\n" },
+			lineRoot,
+			"an added '+++ -- c' line is a new comment",
+		);
+		await expectBlocked(
+			"apply_patch",
+			{ input: "--- a/a.py\n+++ b/a.py\n@@ -1,1 +1,2 @@\n v0 = 0\n+++ # c\n" },
+			lineRoot,
+			"an added '+++ # c' line is a new comment",
+		);
+
+		writeFileSync(join(lineRoot, "big.py"), "x = 1\n".repeat(300_000));
+		const startedAt = Date.now();
+		const bigViolation = await findNewSourceComments(
+			"apply_patch",
+			{ input: `*** Begin Patch\n*** Update File: big.py\n@@\n${" x = 1\n".repeat(2999)} y = 2\n+# c\n*** End Patch` },
+			lineRoot,
+		);
+		assert.ok(Date.now() - startedAt < 200, `hunk search must stay bounded (${Date.now() - startedAt} ms)`);
+		assert.ok(bigViolation !== undefined);
 		rmSync(lineRoot, { recursive: true, force: true });
 
 		// ─── Tools without file text ────────────────────────────────────────

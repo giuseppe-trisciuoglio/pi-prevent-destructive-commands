@@ -550,11 +550,13 @@ function parsePatchSections(patch: string): PatchedFile[] {
 	let current: PatchedFile | undefined;
 	let mode: "openai-add" | "openai-update" | "openai-move" | "diff" | "skip" | undefined;
 	let hunk: PatchHunk | undefined;
+	let pendingBlanks = 0;
 
 	const startFile = (path: string, newMode: typeof mode): void => {
 		current = { path, addedLines: [], removedLines: [], hunks: [] };
 		files.push(current);
 		hunk = undefined;
+		pendingBlanks = 0;
 		mode = newMode;
 	};
 
@@ -566,7 +568,9 @@ function parsePatchSections(patch: string): PatchedFile[] {
 			const numeric = HUNK_HEADER.exec(line);
 			const anchor = line.slice(2).trim();
 			hunk = { ops: [] };
-			if (numeric) hunk.start = Number(numeric[1]);
+			pendingBlanks = 0;
+			const start = numeric ? Number(numeric[1]) : undefined;
+			if (start !== undefined && Number.isSafeInteger(start) && start >= 1) hunk.start = start;
 			else if (anchor.length > 0) hunk.anchor = anchor;
 			current.hunks.push(hunk);
 			continue;
@@ -630,15 +634,22 @@ function parsePatchSections(patch: string): PatchedFile[] {
 		}
 		if (inHunkMode && current) {
 			const first = line[0];
+			if (line.length === 0 && hunk !== undefined) {
+				pendingBlanks++;
+				continue;
+			}
 			if (first !== "+" && first !== "-" && first !== " ") {
-				// Includes "\ No newline at end of file", blank lines and git metadata.
-				if (line.length > 0 && first !== "\\") hunk = undefined;
+				// Includes "\ No newline at end of file" and git metadata.
+				if (first !== "\\") hunk = undefined;
+				pendingBlanks = 0;
 				continue;
 			}
 			if (hunk === undefined) {
 				hunk = { ops: [] };
 				current.hunks.push(hunk);
 			}
+			// Blank lines are empty context lines only when the hunk continues after them.
+			for (; pendingBlanks > 0; pendingBlanks--) hunk.ops.push({ op: " ", text: "" });
 			const text = line.slice(1);
 			if (first === "+") {
 				hunk.ops.push({ op: "+", text, addedIndex: current.addedLines.length });
@@ -658,6 +669,9 @@ function parsePatchSections(patch: string): PatchedFile[] {
 function normalizeNewlines(text: string): string {
 	return text.replace(/\r\n/g, "\n");
 }
+
+/** Maximum line comparisons spent locating a hunk; beyond it the location is not reported. */
+const HUNK_SEARCH_BUDGET = 2_000_000;
 
 /** New-file line of the added line `addedIndex`, or undefined when it cannot be determined. */
 function patchFileLine(file: PatchedFile, addedIndex: number, fileText: () => Promise<string | undefined>): Promise<number | undefined> {
@@ -680,8 +694,15 @@ function patchFileLine(file: PatchedFile, addedIndex: number, fileText: () => Pr
 			if (anchorIndex >= 0) from = anchorIndex + 1;
 		}
 		let match = -1;
+		let budget = HUNK_SEARCH_BUDGET;
+		const first = oldSide[0];
 		for (let i = from; i + oldSide.length <= fileLines.length; i++) {
-			if (oldSide.every((expected, offset) => fileLines[i + offset] === expected)) {
+			if (fileLines[i] !== first) continue;
+			let offset = 1;
+			while (offset < oldSide.length && fileLines[i + offset] === oldSide[offset]) offset++;
+			budget -= offset;
+			if (budget < 0) return undefined;
+			if (offset === oldSide.length) {
 				if (match >= 0) return undefined;
 				match = i;
 			}
