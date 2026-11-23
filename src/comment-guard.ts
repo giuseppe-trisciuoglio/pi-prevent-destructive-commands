@@ -527,6 +527,9 @@ interface PatchHunk {
 	/** Text after a bare `@@`, usually the line preceding the hunk. */
 	anchor?: string;
 	ops: PatchOp[];
+	/** Old and new lines still expected, from a numeric header; undefined for a bare `@@`. */
+	remainingOld?: number;
+	remainingNew?: number;
 }
 
 interface PatchedFile {
@@ -536,12 +539,18 @@ interface PatchedFile {
 	hunks: PatchHunk[];
 }
 
-const HUNK_HEADER = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/;
+const HUNK_HEADER = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
 const ADD_FILE_HEADER = /^\*\*\* Add File: (.+)$/;
 const UPDATE_FILE_HEADER = /^\*\*\* Update File: (.+)$/;
 const MOVE_TO_HEADER = /^\*\*\* Move to: (.+)$/;
 const SECTION_HEADER = /^\*\*\* /;
 const NEW_FILE_DIFF_HEADER = /^\+\+\+\s+(?:[ab]\/)?([^\t\n]+)$/;
+
+function consumeCounts(hunk: PatchHunk, op: string): void {
+	if (hunk.remainingOld === undefined || hunk.remainingNew === undefined) return;
+	if (op !== "+") hunk.remainingOld--;
+	if (op !== "-") hunk.remainingNew--;
+}
 
 function parsePatchSections(patch: string): PatchedFile[] {
 	const files: PatchedFile[] = [];
@@ -569,7 +578,11 @@ function parsePatchSections(patch: string): PatchedFile[] {
 			const anchor = line.slice(2).trim();
 			hunk = { ops: [] };
 			pendingBlanks = 0;
-			const start = numeric ? Number(numeric[1]) : undefined;
+			const start = numeric ? Number(numeric[3]) : undefined;
+			if (numeric) {
+				hunk.remainingOld = numeric[2] === undefined ? 1 : Number(numeric[2]);
+				hunk.remainingNew = numeric[4] === undefined ? 1 : Number(numeric[4]);
+			}
 			if (start !== undefined && Number.isSafeInteger(start) && start >= 1) hunk.start = start;
 			else if (anchor.length > 0) hunk.anchor = anchor;
 			current.hunks.push(hunk);
@@ -600,28 +613,43 @@ function parsePatchSections(patch: string): PatchedFile[] {
 			continue;
 		}
 
-		// "---"/"+++" are file headers outside a hunk, or right before the next "@@";
-		// inside a hunk they are ordinary removed/added lines.
+		// "---"/"+++" are file headers outside a hunk, and inside one when the
+		// declared line counts are exhausted (numeric header) or when a "---"
+		// line is followed by "+++" (always) / a "+++" line by "@@" (bare header).
 		const diffMatch = NEW_FILE_DIFF_HEADER.exec(line);
-		const headerPosition = hunk === undefined || (lines[index + 1] ?? "").startsWith("@@");
-		if (diffMatch && headerPosition) {
+		const isOldHeaderLine = line.startsWith("--- ");
+		if ((diffMatch || (mode === "diff" && isOldHeaderLine)) && hunk !== undefined) {
+			const counted = hunk.remainingOld !== undefined && hunk.remainingNew !== undefined;
+			const next = lines[index + 1] ?? "";
+			let isHeader: boolean;
+			if (!diffMatch && next.startsWith("+++ ")) {
+				isHeader = true;
+			} else if (counted) {
+				const room = diffMatch ? hunk.remainingNew! - pendingBlanks : hunk.remainingOld! - pendingBlanks;
+				isHeader = room <= 0;
+			} else {
+				isHeader = diffMatch ? next.startsWith("@@") : next.startsWith("+++ ");
+			}
+			if (!isHeader) {
+				// Falls through as an ordinary added/removed line.
+			} else if (!diffMatch) {
+				hunk = undefined;
+				continue;
+			} else {
+				hunk = undefined;
+			}
+		}
+		if (diffMatch && hunk === undefined) {
 			const diffPath = diffMatch[1] === "/dev/null" ? undefined : diffMatch[1];
 			if (diffPath) {
 				startFile(diffPath, "diff");
 			} else {
 				current = undefined;
-				hunk = undefined;
 				mode = "skip";
 			}
 			continue;
 		}
-		if (mode === "diff" && line.startsWith("--- ")) {
-			const next = lines[index + 1] ?? "";
-			if (hunk === undefined || (next.startsWith("+++ ") && (lines[index + 2] ?? "").startsWith("@@"))) {
-				hunk = undefined;
-				continue;
-			}
-		}
+		if (mode === "diff" && isOldHeaderLine && hunk === undefined) continue;
 
 		if (mode === "openai-add" && current) {
 			// Add File bodies prefix every content line with "+".
@@ -649,7 +677,11 @@ function parsePatchSections(patch: string): PatchedFile[] {
 				current.hunks.push(hunk);
 			}
 			// Blank lines are empty context lines only when the hunk continues after them.
-			for (; pendingBlanks > 0; pendingBlanks--) hunk.ops.push({ op: " ", text: "" });
+			for (; pendingBlanks > 0; pendingBlanks--) {
+				hunk.ops.push({ op: " ", text: "" });
+				consumeCounts(hunk, " ");
+			}
+			consumeCounts(hunk, first);
 			const text = line.slice(1);
 			if (first === "+") {
 				hunk.ops.push({ op: "+", text, addedIndex: current.addedLines.length });

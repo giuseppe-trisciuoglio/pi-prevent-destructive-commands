@@ -733,6 +733,44 @@ runIsolatedTest(
 		);
 		assert.ok(Date.now() - startedAt < 200, `hunk search must stay bounded (${Date.now() - startedAt} ms)`);
 		assert.ok(bigViolation !== undefined);
+		writeFileSync(join(lineRoot, "a.txt"), "a\n");
+		writeFileSync(join(lineRoot, "b.py"), "b = 1\n");
+		const secondFile = await findNewSourceComments(
+			"apply_patch",
+			{ input: "--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-a\n+b\n--- a/b.py\n+++ b/b.py\n+# c\n" },
+			lineRoot,
+		);
+		assert.deepEqual([secondFile?.path, secondFile?.line], ["b.py", 1], "second file headers without @@ are headers");
+		const secondPy = await findNewSourceComments(
+			"apply_patch",
+			{ input: "--- a/a.py\n+++ b/a.py\n@@ -1 +1 @@\n-v0 = 0\n+v0 = 1\n--- a/b.py\n+++ b/b.py\n+# c\n" },
+			lineRoot,
+		);
+		assert.deepEqual([secondPy?.path, secondPy?.line], ["b.py", 1], "a first .py file does not absorb the second");
+		const wellFormed = await findNewSourceComments(
+			"apply_patch",
+			{ input: "--- a/a.py\n+++ b/a.py\n@@ -1,2 +1,2 @@\n v0 = 0\n-v1 = 1\n+v1 = 2\n--- a/b.py\n+++ b/b.py\n@@ -1 +1,2 @@\n b = 1\n+# c\n" },
+			lineRoot,
+		);
+		assert.deepEqual([wellFormed?.path, wellFormed?.line], ["b.py", 2], "a well-formed multi-file diff");
+		const truncated = await findNewSourceComments(
+			"apply_patch",
+			{ input: "--- a/a.py\n+++ b/a.py\n@@ -1,2 +1,2 @@\n-v0 = 0\n+v0 = 1\n--- a/b.py\n+++ b/b.py\n+# c\n" },
+			lineRoot,
+		);
+		assert.deepEqual([truncated?.path, truncated?.line], ["b.py", 1], "a ---/+++ pair is a header even when counts are short");
+		const bareSecond = await findNewSourceComments(
+			"apply_patch",
+			{ input: "--- a/a.txt\n+++ b/a.txt\n@@\n-a\n+b\n--- a/b.py\n+++ b/b.py\n+# c\n" },
+			lineRoot,
+		);
+		assert.equal(bareSecond?.path, "b.py", "a bare @@ hunk also ends at a ---/+++ pair");
+		await expectAllowed(
+			"apply_patch",
+			{ input: "--- a/q.sql\n+++ b/q.sql\n@@ -1,2 +1,2 @@\n--- old\n+-- old\n select 1;\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-a\n+b\n" },
+			lineRoot,
+			"a counted hunk keeps '--- old' as content and still allows the unchanged re-add",
+		);
 		rmSync(lineRoot, { recursive: true, force: true });
 
 		// ─── Tools without file text ────────────────────────────────────────
