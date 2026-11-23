@@ -63,6 +63,12 @@ Input files and path-valued options stay unclassified and are still checked.
   handling. Each `-e` script is classified separately.
 - Interpreter script files (`node /x.js`, `python3 /x.py`) and their input
   files remain checked.
+- **Markup literals (issue #55):** the literal scanner already honours `\`
+  escapes. A literal with whitespace and `/` is normally re-analyzed as a shell
+  command line, which misreads markup (`<script src="a.js"></script>`, where
+  `</script>` is a redirect from `/script`). A literal containing a tag and no
+  shell metacharacters (`; | & $` backtick, newline) is instead checked only for
+  words starting with `/`, `~` or `..`.
 
 ## Consequences
 

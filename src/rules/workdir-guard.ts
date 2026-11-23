@@ -483,6 +483,10 @@ function programText(token: string): string {
 	return token;
 }
 
+/** An HTML/XML-like tag inside a literal, and shell metacharacters that rule out the markup reading. */
+const MARKUP_TAG = /<\/?[A-Za-z][^<>]*>/;
+const SHELL_META = /[;|&$`\n]/;
+
 /**
  * Checks one string literal of an inline program: literals holding a shell
  * command line (whitespace and a `/`) are analyzed as commands, other
@@ -490,6 +494,19 @@ function programText(token: string): string {
  */
 function checkProgramLiteral(literal: string, cwd: string, boundaryCwd: string, depth: number): CheckResult {
 	if (literal.includes("://")) return SAFE;
+	if (MARKUP_TAG.test(literal) && !SHELL_META.test(literal)) {
+		// Markup such as `<script src="a.js"></script>` is not a command line
+		// (`</script>` would tokenize as a redirect from "/script"): only words
+		// that start like a path are checked.
+		for (const raw of literal.split(/\s+/)) {
+			const word = raw.replace(/^[\w:-]+=["']?/, "");
+			if (/^(?:\/|~|\.\.)/.test(word) && looksLikePath(word)) {
+				const r = checkPathInsideWorkdir(word, cwd, boundaryCwd, "read");
+				if (r.dangerous) return r;
+			}
+		}
+		return SAFE;
+	}
 	if (/\s/.test(literal) && literal.includes("/")) return checkCommandWorkdir(literal, cwd, depth + 1);
 	if (looksLikePath(literal)) return checkPathInsideWorkdir(literal, cwd, boundaryCwd, "read");
 	return SAFE;

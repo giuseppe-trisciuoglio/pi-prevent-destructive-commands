@@ -194,6 +194,12 @@ case_("deno eval --env-file /etc/x 'Deno.readTextFileSync(\"/etc/passwd\")'", tr
 case_("deno eval --tsconfig /etc/x 'x'", true, "deno eval --tsconfig value is checked");
 case_("deno eval --unknown-opt /etc/x 'x'", true, "deno eval unknown option: no program classified, generic analysis");
 case_("deno eval --ext ts \"console.log(/a/.test('b'))\"", false, "deno eval --ext code regex is not a path");
+case_("node -e 'var a=\"<script src=\\\"js/a.js\\\"></script>\";'", false, "escaped quotes inside a JS literal: markup is not a command line (#55)");
+case_("node -e 'var a=\"</script>\"'", false, "closing tag literal (#55)");
+case_("node -e 'var a=\"x</script>\"'", false, "closing tag after text (#55)");
+case_("node -e 'console.log(\"</div>\")'", false, "closing div literal (#55)");
+case_("node -e 'var a=\"<script src=\\\"/etc/passwd\\\"></script>\";'", true, "markup with an absolute path word is still checked (#55)");
+case_("node -e 'var a=\"<x> cat /etc/passwd\"'", true, "markup-like literal with outside path stays blocked (#55)");
 case_("perl -e 'unlink \"/\"'", true, "slash literal passed to unlink is checked");
 case_("python3 -c \"os.listdir('/ ')\"", true, "slash literal passed to os.listdir is checked");
 case_("node -e \"require('fs').rmSync('/')\"", true, "slash literal passed to rmSync is checked");
