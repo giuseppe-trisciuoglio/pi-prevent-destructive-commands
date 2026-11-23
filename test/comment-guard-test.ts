@@ -36,6 +36,15 @@ runIsolatedTest(
 	async (root) => {
 		// ─── Comment extraction ─────────────────────────────────────────────
 
+		// A `/` after the `)` of an if/while/for condition opens a regex literal (issue #53).
+		assert.deepEqual(extractComments("if (x) /'/.test(s); const p = 'a/*b';", "c"), []);
+		assert.deepEqual(extractComments("while (f(a)) /'/.test(s); const p = 'a/*b';", "c"), []);
+		assert.deepEqual(extractComments("for (;;) /'/.test(s); const p = 'a/*b';", "c"), []);
+		// A division after another `)` stays a division, so a real trailing comment is still found.
+		assert.equal(extractComments("const r = (a + b) / 2; // note", "c").length, 1);
+		assert.equal(extractComments("const r = f(x) / 2; // note", "c").length, 1);
+		assert.equal(extractComments("const r = o.if(x) / 2; // note", "c").length, 1);
+
 		const javaComments = extractComments(
 			["package demo;", "", "public class Foo {", "\t// explanation", "\t/* block", "\t   note */", "}"].join("\n"),
 			"c",

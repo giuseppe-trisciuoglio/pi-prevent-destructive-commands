@@ -49,12 +49,14 @@ reported as a new comment. A plain JS helper script under `/tmp` was blocked.
 
 - The reported patterns (shell-quoting helpers, escapers, path globs in
   strings) no longer block writes.
-- Rare constructs such as `if (x) /re/.test(s)` (regex right after `)`) are
-  read as a division. Usually the line-based fallback then applies, but when
-  the regex body and a later string balance each other on the same line —
-  `if (x) /'/.test(s); const p = 'a/*b';` — the inverted state reports a false
-  comment. This is accepted: the construct is rare and the heuristic stays
-  simple.
+- A `/` after the `)` closing the condition of `if`/`while`/`for` starts a
+  regex literal (issue #53): the matching `(` is found by a bounded backward
+  paren count and the keyword before it is checked, so
+  `if (x) /'/.test(s); const p = 'a/*b';` is no longer a false comment. Any
+  other `)` (calls, grouping, `o.if(x)`) keeps meaning a division. Remaining
+  limitation: parentheses inside strings in the condition can fool the paren
+  count, and a regex after `)` of other statements (`do ... while`, `with`) is
+  still read as a division; the line-based fallback then usually applies.
 - A desync no longer discards the real comments found before it (for example
   `let x = 1; // real` before an unclosed quote is still blocked).
 - Covered by `test/comment-guard-test.ts` (issue #49 block).

@@ -153,7 +153,20 @@ function interpreterSpec(language: ProgramLanguage, valueLetters: string, progra
 	};
 }
 
-const NODE_SPEC = interpreterSpec("js", "eprC", "ep", ["--eval", "--print", "--require", "--import", "--input-type", "--conditions"], ["--eval", "--print"]);
+const NODE_SPEC = interpreterSpec(
+	"js",
+	"eprC",
+	"ep",
+	[
+		"--eval", "--print", "--require", "--import", "--input-type", "--conditions", "--loader", "--experimental-loader",
+		"--env-file", "--max-old-space-size", "--max-semi-space-size", "--stack-size", "--stack-trace-limit",
+		"--title", "--inspect-port", "--max-http-header-size", "--watch-path", "--experimental-default-type",
+		"--disable-warning", "--redirect-warnings", "--openssl-config", "--icu-data-dir", "--dns-result-order",
+		"--unhandled-rejections", "--heapsnapshot-signal", "--diagnostic-dir", "--report-dir", "--report-signal",
+		"--secure-heap", "--secure-heap-min", "--test-reporter", "--test-name-pattern", "--cpu-prof-dir", "--heap-prof-dir",
+	],
+	["--eval", "--print"],
+);
 const PYTHON_SPEC = interpreterSpec("python", "cmWX", "c", [], []);
 const RUBY_SPEC = interpreterSpec("ruby", "erICFE", "e", [], []);
 const PERL_SPEC = interpreterSpec("perl", "eEIMmxFiC0ldD", "eE", [], []);
@@ -168,14 +181,21 @@ const PERL_NUMERIC_VALUE: Record<string, RegExp> = { l: /^[0-7]*/, "0": /^(?:x[0
 const DENO_VALUE_OPTIONS = new Set([
 	"--ext", "--import-map", "-c", "--config", "--location", "--cert", "--seed", "--log-level", "-L",
 	"--v8-flags", "--lock", "--env-file", "--tsconfig", "--node-modules-dir", "--conditions", "--preload",
-	"--import", "--inspect", "--inspect-brk", "--inspect-wait", "--reload", "-r", "--check", "--unsafely-ignore-certificate-errors",
+	"--import",
 ]);
 
 /** `deno eval` options known to take no separate value. */
 const DENO_BOOLEAN_OPTIONS = new Set([
 	"-q", "--quiet", "-A", "--allow-all", "-p", "--print", "-T", "--ts", "--no-check", "--no-remote", "--no-npm",
 	"--no-config", "--no-lock", "--cached-only", "--frozen", "--unstable", "--env", "--no-prompt",
+	// Optional values are attached with `=`, so these never take a separate value token.
+	"--check", "--reload", "-r", "--watch", "--watch-hmr", "--no-clear-screen", "--inspect", "--inspect-brk", "--inspect-wait",
+	"--unsafely-ignore-certificate-errors", "--lock-write", "--no-terminal-colors", "--no-code-cache", "--sloppy-imports",
+	"--vendor", "--no-vendor", "--check-js", "--no-npm-install", "--prefer-offline",
 ]);
+
+/** A split `--opt=` value that is plainly a quoted value (glob or list characters), not a bare word. */
+const SPLIT_VALUE_HINT = /[*?[\]{}!,\s]/;
 
 function isKnownDenoBoolean(option: string): boolean {
 	return DENO_BOOLEAN_OPTIONS.has(option) || /^--(?:allow|deny|unstable)-[a-z-]+$/.test(option);
@@ -267,11 +287,23 @@ export function classifyProgramOperands(tokens: readonly string[], index: number
 			const eq = token.indexOf("=");
 			const option = eq > 0 ? token.slice(0, eq) : token;
 			if (spec.suppliesProgram(option)) supplied = true;
-			if (eq > 0 && eq === token.length - 1 && spec.longValueOptions.has(option) && j + 1 < tokens.length) {
+			const nextToken = j + 1 < tokens.length ? tokens[j + 1]! : undefined;
+			if (eq > 0 && eq === token.length - 1 && name === "node" && spec.longPatternOptions.has(option)) {
+				// `--eval='code'` is split into `--eval=` and `code`: the next token is the program.
+				if (nextToken !== undefined && nextToken !== "" && !nextToken.startsWith("-") && !SHELL_OPERATORS.has(nextToken)) {
+					programIndices.set(j + 1, "js");
+					j++;
+				}
+				continue;
+			}
+			if (eq > 0 && eq === token.length - 1 && spec.longValueOptions.has(option) && nextToken !== undefined) {
 				// The tokenizer splits `--include='*.ts'` into `--include=` and `*.ts`: the next token is
 				// the value. It is left unclassified (still checked as a path), since `--regexp= /x`
-				// cannot be told apart from it.
-				j++;
+				// cannot be told apart from it. An option-like next token is not a value, and a plain word
+				// (`rg --color= foo /etc`) may be an empty value followed by the pattern: it is not consumed, so
+				// the operand after it is checked as a path. Only glob-like values (`*.ts`) are consumed.
+				if (nextToken === "" || (!nextToken.startsWith("-") && SPLIT_VALUE_HINT.test(nextToken))) j++;
+				else if (!nextToken.startsWith("-")) positionalDone = true; // no pattern is assumed: later operands stay checked
 				continue;
 			}
 			if (eq > 0) {
@@ -279,6 +311,8 @@ export function classifyProgramOperands(tokens: readonly string[], index: number
 				continue;
 			}
 			if (spec.longValueOptions.has(option) && j + 1 < tokens.length) {
+				// node `--print -e CODE`: `--print` takes an optional script, an option is not it.
+				if (name === "node" && option === "--print" && /^-./.test(tokens[j + 1]!)) continue;
 				if (spec.longPatternOptions.has(option)) markPattern(j + 1, option);
 				j++;
 			}
@@ -299,6 +333,8 @@ export function classifyProgramOperands(tokens: readonly string[], index: number
 				if (spec.suppliesProgram(letter)) supplied = true;
 				const attached = letters.slice(k + 1);
 				if (attached === "") {
+					// node `-p -e CODE`: `-p` takes an optional script, an option is not it.
+					if (name === "node" && letter === "p" && j + 1 < tokens.length && /^-./.test(tokens[j + 1]!)) break;
 					if (!optionalAttached.includes(letter) && j + 1 < tokens.length) {
 						if (spec.shortPatternLetters.includes(letter)) markPattern(j + 1, letter);
 						j++;

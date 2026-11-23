@@ -301,6 +301,32 @@ export function extractComments(
 		return content[k] !== "'";
 	};
 
+	/**
+	 * Whether the `)` at `close` ends the condition of `if`/`while`/`for`, after which a
+	 * `/` starts a statement (a regex literal), not a division. The matching `(` is found by
+	 * a bounded backward paren count; when it cannot be found the `/` stays a division.
+	 */
+	const closesStatementCondition = (close: number): boolean => {
+		let depth = 0;
+		const limit = Math.max(0, close - 500);
+		for (let k = close; k >= limit; k--) {
+			const ch = content[k]!;
+			if (ch === ")") depth++;
+			else if (ch === "(") {
+				depth--;
+				if (depth === 0) {
+					let end = k - 1;
+					while (end >= 0 && /\s/.test(content[end]!)) end--;
+					let start = end;
+					while (start > 0 && /[A-Za-z0-9_$]/.test(content[start - 1]!)) start--;
+					if (start > 0 && content[start - 1] === ".") return false;
+					return /^(?:if|while|for)$/.test(content.slice(start, end + 1));
+				}
+			}
+		}
+		return false;
+	};
+
 	/** Whether the `/` at `i` is in an expression position, so it opens a regex literal. */
 	const regexAllowedHere = (): boolean => {
 		let k = i - 1;
@@ -313,6 +339,7 @@ export function extractComments(
 		// `total! / n`, `f()! / n`: a TypeScript non-null assertion ends an operand.
 		if (previous === "!" && /[A-Za-z0-9_$)\]]/.test(beforePrevious)) return false;
 		if (REGEX_PRECEDING_CHARACTERS.includes(previous)) return true;
+		if (previous === ")") return closesStatementCondition(k);
 		if (!/[A-Za-z_$]/.test(previous)) return false;
 		let start = k;
 		while (start > 0 && /[A-Za-z0-9_$]/.test(content[start - 1]!)) start--;

@@ -66,7 +66,8 @@ function prCloseDeletesBranch(tokens: readonly string[], start: number, end: num
 		if (token.startsWith("--delete-branch=")) {
 			return token.slice("--delete-branch=".length).toLowerCase() !== "false";
 		}
-		if (/^-[A-Za-z]+$/.test(token)) {
+		// Short cluster, possibly with an attached value (`-dRa/b`, `-dcmsg`): scan up to the first value letter.
+		if (/^-[A-Za-z]/.test(token)) {
 			for (const letter of token.slice(1)) {
 				if (letter === "d") return true;
 				if (GH_PR_CLOSE_SHORT_VALUE_LETTERS.includes(letter)) break;

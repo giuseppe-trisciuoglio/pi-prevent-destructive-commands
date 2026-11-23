@@ -73,6 +73,26 @@ Input files and path-valued options stay unclassified and are still checked.
   outside tags is hidden and attribute paths stay checked. No shortcut skips
   the command analysis.
 
+- **Amendment (issue #53).**
+  - `node`/`bun` `--eval=`/`--print=` with the code in the next token (as the
+    tokenizer splits a quoted value) is classified as a program, like the
+    attached `--eval=CODE`.
+  - The node option table now lists the common value-taking options
+    (`--max-old-space-size`, `--stack-size`, `--loader`, `--env-file`,
+    `--conditions`, ...), so `-e`/`-p` after them is still found. `-p`/`--print`
+    does not consume an option-like next token, so `-p -e CODE` marks CODE.
+  - `deno eval` treats `--check`, `--reload`/`-r`, `--inspect*`, `--watch` and
+    other optional-value options as booleans (their values are attached with
+    `=`), and knows more boolean options. Unknown options still fall back to
+    the generic analysis.
+  - A split `--opt=` followed by an option does not consume it. When the next
+    token is a plain word it may be an empty value followed by the pattern
+    (`rg --color= foo /etc`), so it is not consumed and no pattern is assumed:
+    later operands are checked as paths. Only glob-like values (`*.ts`, lists)
+    are consumed as the value. The ambiguity resolves towards checking, so a
+    rare quoted plain-word value (`--exclude-dir='node_modules' '/api/' f`) can
+    now block the pattern; no previously blocked case is allowed.
+
 ## Consequences
 
 - Common inspection and conflict-resolution commands no longer push agents to

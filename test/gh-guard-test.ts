@@ -106,6 +106,9 @@ const SAFE_COMMANDS: string[] = [
 	"gh pr close 31 --comment 'closing'",
 	"gh pr close 31 -c -d",
 	"gh pr close 31 -Rd",
+	"gh pr close 1 -Rd",
+	"gh pr close 1 -Ra/b",
+	"gh pr close 1 -cdmsg",
 	"gh pr close 31 --delete-branch=false",
 ];
 
@@ -138,6 +141,8 @@ async function main(): Promise<void> {
 		"gh pr close 31 -R owner/repo -d",
 		"gh -R owner/repo pr close 31 --delete-branch",
 		"gh pr close 31 --comment 'bye' -d",
+		"gh pr close 1 -dRa/b",
+		"gh pr close 1 -dcmsg",
 	]) {
 		const r = checkCommand(command, cwd);
 		assert.equal(r.dangerous, true, `expected block: ${command}`);

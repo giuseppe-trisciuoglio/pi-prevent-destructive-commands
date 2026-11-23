@@ -410,6 +410,31 @@ case_("gh api \"/repos/$(cat /etc/passwd)\"", true, "command substitution in end
 case_("sonar api get --data /etc/passwd /api/x", true, "sonar non-strict form not exempted");
 case_("gh pr view /etc/passwd", true, "other gh subcommands unaffected");
 
+// Issue #53: node/deno/--opt= leftovers.
+const READ_PASSWD = `require("fs").readFileSync("/etc/passwd")`;
+case_(`node --eval='${READ_PASSWD}'`, true, "node --eval= split program is scanned");
+case_(`node --print='${READ_PASSWD}'`, true, "node --print= split program is scanned");
+case_(`node --eval=${READ_PASSWD.replace(/ /g, "")}`, true, "node --eval=CODE attached is scanned");
+case_(`node -p -e '${READ_PASSWD}'`, true, "node -p -e program is scanned");
+case_(`node --print -e '${READ_PASSWD}'`, true, "node --print -e program is scanned");
+case_(`node --max-old-space-size 100 -e '${READ_PASSWD}'`, true, "node value option before -e");
+case_(`node --stack-size 1 -pe '${READ_PASSWD}'`, true, "node value option before -pe");
+case_(`node -r ./x.js -e '${READ_PASSWD}'`, true, "node -r value before -e");
+case_(`deno eval --check 'Deno.readTextFileSync("/etc/passwd")'`, true, "deno eval --check program is scanned");
+case_(`deno eval -q --no-remote 'Deno.readTextFileSync("/etc/passwd")'`, true, "deno eval booleans before program");
+case_(`deno eval --reload 'Deno.readTextFileSync("/etc/passwd")'`, true, "deno eval --reload program is scanned");
+case_("rg --color= foo /etc", true, "empty --opt= does not swallow the pattern");
+case_("grep --exclude-dir= foo /etc", true, "empty --exclude-dir= does not swallow the pattern");
+case_("rg --color= --hidden foo /etc", true, "empty --opt= before an option");
+case_("rg --color=never foo /etc", true, "attached value, path still blocked");
+case_(`node --eval='x.replace(/a/,"b")'`, false, "node --eval= split regex literal allowed");
+case_(`node --max-old-space-size 100 -e "x.replace(/a/,'b')"`, false, "node value option, regex program allowed");
+case_("node -p -e 'x.replace(/a/,1)'", false, "node -p -e regex program allowed");
+case_("deno eval --check 'x.replace(/a/,1)'", false, "deno eval --check regex program allowed");
+case_("rg --color=never '/api/' src", false, "attached empty-free value, pattern allowed");
+case_("grep -r --include='*.ts' '/x/' .", false, "glob value still consumed");
+case_("rg --color= foo src", false, "empty --opt= with relative path allowed");
+
 if (failed > 0) {
 	console.error(`\n${failed} test(s) failed`);
 	process.exit(1);
