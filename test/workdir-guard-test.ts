@@ -212,6 +212,15 @@ case_("node -e 'var a=\"<b> ls \\\\/etc\"'", true, "markup-like literal bypass s
 case_("node -e 'var a=\"<b> ls \\\"\\\"/etc\"'", true, "markup-like literal bypass stays blocked (#55)");
 case_("node -e 'var a=\"<b> cat x/../../x\"'", true, "markup-like literal bypass stays blocked (#55)");
 case_("node -e 'var a=\"<b> cat ./../../../../etc/passwd\"'", true, "markup-like literal bypass stays blocked (#55)");
+{
+	const started = Date.now();
+	const r = run(`node -e 'var a="<a${" ".repeat(100000)}"'`);
+	const ms = Date.now() - started;
+	const ok = ms < 200 && !r.dangerous;
+	if (ok) passed++;
+	else failed++;
+	console.log(`${ok ? "PASS" : "FAIL"} unterminated tag followed by 100k spaces is linear - ${ms} ms (#55)`);
+}
 case_("perl -e 'unlink \"/\"'", true, "slash literal passed to unlink is checked");
 case_("python3 -c \"os.listdir('/ ')\"", true, "slash literal passed to os.listdir is checked");
 case_("node -e \"require('fs').rmSync('/')\"", true, "slash literal passed to rmSync is checked");

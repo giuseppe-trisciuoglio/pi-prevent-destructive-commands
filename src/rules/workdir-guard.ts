@@ -484,7 +484,7 @@ function programText(token: string): string {
 }
 
 /** A well-formed HTML/XML tag: the name is followed by whitespace, `>` or `/>`, so `</etc/passwd>` is not one. */
-const MARKUP_TAG = /<\/?[A-Za-z][\w:-]*(?:\s+[^<>]*?)?\/?>/g;
+const MARKUP_TAG = /<\/?[A-Za-z][\w:-]*(?:\s[^<>]*)?\/?>/g;
 
 /**
  * Replaces each well-formed tag by its attribute values (names and quotes
