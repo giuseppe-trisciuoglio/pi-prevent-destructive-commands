@@ -518,8 +518,11 @@ interface PatchedFile {
 	path: string;
 	addedLines: string[];
 	removedLines: string[];
+	/** New-file line of each added line, set only when hunk headers gave a start line. */
+	addedLineNumbers?: number[];
 }
 
+const HUNK_HEADER = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/;
 const ADD_FILE_HEADER = /^\*\*\* Add File: (.+)$/;
 const UPDATE_FILE_HEADER = /^\*\*\* Update File: (.+)$/;
 const MOVE_TO_HEADER = /^\*\*\* Move to: (.+)$/;
@@ -533,12 +536,21 @@ function parsePatchSections(patch: string): PatchedFile[] {
 	let current: PatchedFile | undefined;
 	let mode: "openai-add" | "openai-update" | "openai-move" | "diff" | "skip" | undefined;
 	let diffPath: string | undefined;
+	/** Next new-file line inside the current hunk, when its header gave one. */
+	let nextLine: number | undefined;
 
 	for (const line of lines) {
+		const hunkMatch = HUNK_HEADER.exec(line);
+		if (hunkMatch && current && (mode === "diff" || mode === "openai-update")) {
+			nextLine = Number(hunkMatch[1]);
+			current.addedLineNumbers ??= [];
+			continue;
+		}
 		const addMatch = ADD_FILE_HEADER.exec(line);
 		if (addMatch) {
 			current = { path: addMatch[1]!, addedLines: [], removedLines: [] };
 			files.push(current);
+			nextLine = undefined;
 			mode = "openai-add";
 			continue;
 		}
@@ -546,6 +558,7 @@ function parsePatchSections(patch: string): PatchedFile[] {
 		if (updateMatch) {
 			current = { path: updateMatch[1]!, addedLines: [], removedLines: [] };
 			files.push(current);
+			nextLine = undefined;
 			mode = "openai-update";
 			continue;
 		}
@@ -568,6 +581,7 @@ function parsePatchSections(patch: string): PatchedFile[] {
 			if (diffPath) {
 				current = { path: diffPath, addedLines: [], removedLines: [] };
 				files.push(current);
+				nextLine = undefined;
 				mode = "diff";
 			} else {
 				current = undefined;
@@ -582,8 +596,11 @@ function parsePatchSections(patch: string): PatchedFile[] {
 			continue;
 		}
 		if (mode === "openai-update" && current) {
-			if (line.startsWith("+")) current.addedLines.push(line.slice(1));
-			else if (line.startsWith("-")) current.removedLines.push(line.slice(1));
+			if (line.startsWith("+")) {
+				current.addedLines.push(line.slice(1));
+				if (nextLine !== undefined) current.addedLineNumbers?.push(nextLine++);
+			} else if (line.startsWith("-")) current.removedLines.push(line.slice(1));
+			else if (nextLine !== undefined) nextLine++;
 			continue;
 		}
 		if (mode === "openai-move" && current) {
@@ -593,8 +610,11 @@ function parsePatchSections(patch: string): PatchedFile[] {
 		if (mode === "diff" && current) {
 			if (line.startsWith("+") && !NEW_FILE_DIFF_HEADER.test(line)) {
 				current.addedLines.push(line.slice(1));
+				if (nextLine !== undefined) current.addedLineNumbers?.push(nextLine++);
 			} else if (line.startsWith("-") && !/^(?:---)/.test(line)) {
 				current.removedLines.push(line.slice(1));
+			} else if (nextLine !== undefined) {
+				nextLine++;
 			}
 		}
 	}
@@ -620,6 +640,14 @@ async function readTextIfExists(path: string): Promise<string | undefined> {
 	}
 }
 
+/** Number of lines before the single occurrence of `needle`; 0 when the file is unreadable or the match is missing or ambiguous. */
+function linesBeforeUniqueMatch(text: string | undefined, needle: string): number {
+	if (text === undefined || needle.length === 0) return 0;
+	const index = text.indexOf(needle);
+	if (index < 0 || text.indexOf(needle, index + 1) >= 0) return 0;
+	return text.slice(0, index).split("\n").length - 1;
+}
+
 async function violationInFileText(
 	path: string,
 	newText: string,
@@ -640,6 +668,7 @@ function violationInAddedText(
 	path: string,
 	addedLines: readonly string[],
 	removedLines: readonly string[],
+	addedLineNumbers?: readonly number[],
 ): CommentViolation | undefined {
 	const family = commentFamilyForPath(path);
 	if (!family) return undefined;
@@ -647,7 +676,10 @@ function violationInAddedText(
 	const existing = new Set(commentsForPath(removedLines.join("\n") + "\n", path).map(signature));
 
 	const comment = firstNewComment(commentsForPath(addedLines.join("\n") + "\n", path), existing);
-	return comment ? { path, line: comment.line, comment: comment.text } : undefined;
+	if (!comment) return undefined;
+	const fileLine =
+		addedLineNumbers?.length === addedLines.length ? addedLineNumbers[comment.line - 1] : undefined;
+	return { path, line: fileLine ?? comment.line, comment: comment.text };
 }
 
 // ─── Bash write vectors ──────────────────────────────────────────────────────
@@ -774,6 +806,8 @@ export async function findNewSourceComments(
 		if (!isInsideProject(path, cwd)) return undefined;
 		if (commentFamilyForPath(path) === undefined) return undefined;
 
+		const fileText = await readTextIfExists(resolve(cwd, path));
+
 		for (const edit of edits) {
 			if (typeof edit !== "object" || edit === null) continue;
 			const oldText = (edit as Record<string, unknown>).oldText;
@@ -786,7 +820,10 @@ export async function findNewSourceComments(
 					: new Set<string>();
 
 			const comment = firstNewComment(commentsForPath(newText, path), existing);
-			if (comment) return { path, line: comment.line, comment: comment.text };
+			if (comment) {
+				const offset = typeof oldText === "string" ? linesBeforeUniqueMatch(fileText, oldText) : 0;
+				return { path, line: offset + comment.line, comment: comment.text };
+			}
 		}
 
 		return undefined;
@@ -800,7 +837,7 @@ export async function findNewSourceComments(
 
 		for (const file of parsePatchSections(patch)) {
 			if (!isInsideProject(file.path, cwd)) continue;
-			const violation = violationInAddedText(file.path, file.addedLines, file.removedLines);
+			const violation = violationInAddedText(file.path, file.addedLines, file.removedLines, file.addedLineNumbers);
 			if (violation) return violation;
 		}
 
@@ -821,6 +858,7 @@ export function sourceCommentBlockReason(violation: CommentViolation): string {
 	return (
 		`[prevent-destructive-commands] Blocked: ${violation.path}:${violation.line} would introduce a new comment ("${preview}"). ` +
 		"Write self-documenting code without comments and move any explanation into the commit message or pull request. " +
+		"Rewording an existing comment also counts as a new one: delete it instead. " +
 		"Only shebang lines and recognized tooling directives (lint suppressions, formatter switches) are exempt."
 	);
 }

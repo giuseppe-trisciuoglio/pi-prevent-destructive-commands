@@ -561,6 +561,75 @@ runIsolatedTest(
 		);
 		rmSync(join(root, "..foo"), { recursive: true, force: true });
 
+		// ─── Reported line is the file line (issue #54) ─────────────────────
+
+		const lineRoot = join(root, "lines");
+		mkdirSync(lineRoot, { recursive: true });
+		const pyLines = Array.from({ length: 20 }, (_, i) => `v${i} = ${i}`);
+		pyLines[16] = "x = 1  # old";
+		writeFileSync(join(lineRoot, "a.py"), pyLines.join("\n") + "\n");
+		const edited = await findNewSourceComments(
+			"edit",
+			{ path: "a.py", edits: [{ oldText: "x = 1  # old", newText: "x = 1  # new" }] },
+			lineRoot,
+		);
+		assert.equal(edited?.line, 17, "a one-line edit reports the file line");
+		assert.ok(sourceCommentBlockReason(edited!).includes("a.py:17"));
+		assert.ok(sourceCommentBlockReason(edited!).includes("Rewording an existing comment"));
+
+		const multiLine = await findNewSourceComments(
+			"edit",
+			{ path: "a.py", edits: [{ oldText: "x = 1  # old", newText: "x = 1\ny = 2  # new" }] },
+			lineRoot,
+		);
+		assert.equal(multiLine?.line, 18, "a comment on the 2nd newText line reports match line + 1");
+
+		const secondEdit = await findNewSourceComments(
+			"edit",
+			{
+				path: "a.py",
+				edits: [
+					{ oldText: "v2 = 2", newText: "v2 = 3" },
+					{ oldText: "v9 = 9", newText: "v9 = 9  # c" },
+				],
+			},
+			lineRoot,
+		);
+		assert.equal(secondEdit?.line, 10, "each edits[] entry is located on its own");
+
+		const ambiguous = await findNewSourceComments(
+			"edit",
+			{ path: "a.py", edits: [{ oldText: "v1", newText: "v1  # c" }] },
+			lineRoot,
+		);
+		assert.equal(ambiguous?.line, 1, "a non-unique oldText falls back to the snippet line");
+		const missing = await findNewSourceComments(
+			"edit",
+			{ path: "a.py", edits: [{ oldText: "nope", newText: "nope  # c" }] },
+			lineRoot,
+		);
+		assert.equal(missing?.line, 1, "a missing oldText falls back to the snippet line");
+		const noFile = await findNewSourceComments(
+			"edit",
+			{ path: "gone.py", edits: [{ oldText: "a", newText: "a  # c" }] },
+			lineRoot,
+		);
+		assert.equal(noFile?.line, 1, "an unreadable file falls back to the snippet line");
+
+		const hunk = await findNewSourceComments(
+			"apply_patch",
+			{ input: "--- a/a.py\n+++ b/a.py\n@@ -15,4 +15,5 @@\n v14 = 14\n-v15 = 15\n+v15 = 16\n+# note\n v16 = 16\n" },
+			lineRoot,
+		);
+		assert.equal(hunk?.line, 17, "a unified-diff hunk header gives the file line");
+		const patchNoHeader = await findNewSourceComments(
+			"apply_patch",
+			{ input: "*** Begin Patch\n*** Update File: a.py\n@@ context\n v1 = 1\n+# note\n*** End Patch" },
+			lineRoot,
+		);
+		assert.equal(patchNoHeader?.line, 1, "a patch without a hunk header keeps the added-text line");
+		rmSync(lineRoot, { recursive: true, force: true });
+
 		// ─── Tools without file text ────────────────────────────────────────
 
 		await expectAllowed("rename_refactoring", { pathInProject: "svc.ts" }, root, "renames carry no new text");
