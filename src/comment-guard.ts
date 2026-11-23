@@ -14,7 +14,7 @@
  * allowed because they steer tools rather than explain the code.
  */
 
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { basename, extname, isAbsolute, relative, resolve, sep } from "node:path";
 import { extractHeredocs } from "./heredoc";
 import { splitTokensBySeparators } from "./token-segments";
@@ -514,17 +514,43 @@ function firstNewComment(
 // Patch parsing
 // =============================================================================
 
+interface PatchOp {
+	op: " " | "+" | "-";
+	text: string;
+	/** Index into `PatchedFile.addedLines` for "+" operations. */
+	addedIndex?: number;
+}
+
+interface PatchHunk {
+	/** New-file start line from a numeric hunk header. */
+	start?: number;
+	/** Text after a bare `@@`, usually the line preceding the hunk. */
+	anchor?: string;
+	ops: PatchOp[];
+	/** Old and new lines still expected, from a numeric header; undefined for a bare `@@`. */
+	remainingOld?: number;
+	remainingNew?: number;
+}
+
 interface PatchedFile {
 	path: string;
 	addedLines: string[];
 	removedLines: string[];
+	hunks: PatchHunk[];
 }
 
+const HUNK_HEADER = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
 const ADD_FILE_HEADER = /^\*\*\* Add File: (.+)$/;
 const UPDATE_FILE_HEADER = /^\*\*\* Update File: (.+)$/;
 const MOVE_TO_HEADER = /^\*\*\* Move to: (.+)$/;
 const SECTION_HEADER = /^\*\*\* /;
 const NEW_FILE_DIFF_HEADER = /^\+\+\+\s+(?:[ab]\/)?([^\t\n]+)$/;
+
+function consumeCounts(hunk: PatchHunk, op: string): void {
+	if (hunk.remainingOld === undefined || hunk.remainingNew === undefined) return;
+	if (op !== "+") hunk.remainingOld--;
+	if (op !== "-") hunk.remainingNew--;
+}
 
 function parsePatchSections(patch: string): PatchedFile[] {
 	const files: PatchedFile[] = [];
@@ -532,21 +558,45 @@ function parsePatchSections(patch: string): PatchedFile[] {
 
 	let current: PatchedFile | undefined;
 	let mode: "openai-add" | "openai-update" | "openai-move" | "diff" | "skip" | undefined;
-	let diffPath: string | undefined;
+	let hunk: PatchHunk | undefined;
+	let pendingBlanks = 0;
 
-	for (const line of lines) {
+	const startFile = (path: string, newMode: typeof mode): void => {
+		current = { path, addedLines: [], removedLines: [], hunks: [] };
+		files.push(current);
+		hunk = undefined;
+		pendingBlanks = 0;
+		mode = newMode;
+	};
+
+	for (let index = 0; index < lines.length; index++) {
+		const line = lines[index]!;
+		const inHunkMode = mode === "diff" || mode === "openai-update";
+
+		if (inHunkMode && current && line.startsWith("@@")) {
+			const numeric = HUNK_HEADER.exec(line);
+			const anchor = line.slice(2).trim();
+			hunk = { ops: [] };
+			pendingBlanks = 0;
+			const start = numeric ? Number(numeric[3]) : undefined;
+			if (numeric) {
+				hunk.remainingOld = numeric[2] === undefined ? 1 : Number(numeric[2]);
+				hunk.remainingNew = numeric[4] === undefined ? 1 : Number(numeric[4]);
+			}
+			if (start !== undefined && Number.isSafeInteger(start) && start >= 1) hunk.start = start;
+			else if (anchor.length > 0) hunk.anchor = anchor;
+			current.hunks.push(hunk);
+			continue;
+		}
+
 		const addMatch = ADD_FILE_HEADER.exec(line);
 		if (addMatch) {
-			current = { path: addMatch[1]!, addedLines: [], removedLines: [] };
-			files.push(current);
-			mode = "openai-add";
+			startFile(addMatch[1]!, "openai-add");
 			continue;
 		}
 		const updateMatch = UPDATE_FILE_HEADER.exec(line);
 		if (updateMatch) {
-			current = { path: updateMatch[1]!, addedLines: [], removedLines: [] };
-			files.push(current);
-			mode = "openai-update";
+			startFile(updateMatch[1]!, "openai-update");
 			continue;
 		}
 		const moveMatch = MOVE_TO_HEADER.exec(line);
@@ -559,47 +609,138 @@ function parsePatchSections(patch: string): PatchedFile[] {
 		if (SECTION_HEADER.test(line)) {
 			// End Patch or any unrecognized directive: stop reading content.
 			mode = "skip";
+			hunk = undefined;
 			continue;
 		}
 
+		// "---"/"+++" are file headers outside a hunk, and inside one when the
+		// declared line counts are exhausted (numeric header) or when a "---"
+		// line is followed by "+++" (always) / a "+++" line by "@@" (bare header).
 		const diffMatch = NEW_FILE_DIFF_HEADER.exec(line);
-		if (diffMatch) {
-			diffPath = diffMatch[1] === "/dev/null" ? undefined : diffMatch[1];
+		const isOldHeaderLine = line.startsWith("--- ");
+		if ((diffMatch || (mode === "diff" && isOldHeaderLine)) && hunk !== undefined) {
+			const counted = hunk.remainingOld !== undefined && hunk.remainingNew !== undefined;
+			const next = lines[index + 1] ?? "";
+			let isHeader: boolean;
+			if (!diffMatch && next.startsWith("+++ ")) {
+				isHeader = true;
+			} else if (counted) {
+				const room = diffMatch ? hunk.remainingNew! - pendingBlanks : hunk.remainingOld! - pendingBlanks;
+				isHeader = room <= 0;
+			} else {
+				isHeader = diffMatch ? next.startsWith("@@") : next.startsWith("+++ ");
+			}
+			if (!isHeader) {
+				// Falls through as an ordinary added/removed line.
+			} else if (!diffMatch) {
+				hunk = undefined;
+				continue;
+			} else {
+				hunk = undefined;
+			}
+		}
+		if (diffMatch && hunk === undefined) {
+			const diffPath = diffMatch[1] === "/dev/null" ? undefined : diffMatch[1];
 			if (diffPath) {
-				current = { path: diffPath, addedLines: [], removedLines: [] };
-				files.push(current);
-				mode = "diff";
+				startFile(diffPath, "diff");
 			} else {
 				current = undefined;
 				mode = "skip";
 			}
 			continue;
 		}
+		if (mode === "diff" && isOldHeaderLine && hunk === undefined) continue;
 
 		if (mode === "openai-add" && current) {
 			// Add File bodies prefix every content line with "+".
 			current.addedLines.push(line.replace(/^\+/, ""));
 			continue;
 		}
-		if (mode === "openai-update" && current) {
-			if (line.startsWith("+")) current.addedLines.push(line.slice(1));
-			else if (line.startsWith("-")) current.removedLines.push(line.slice(1));
-			continue;
-		}
-		if (mode === "openai-move" && current) {
+		if (mode === "openai-move") {
 			// Renamed-file content lines are moved, not introduced.
 			continue;
 		}
-		if (mode === "diff" && current) {
-			if (line.startsWith("+") && !NEW_FILE_DIFF_HEADER.test(line)) {
-				current.addedLines.push(line.slice(1));
-			} else if (line.startsWith("-") && !/^(?:---)/.test(line)) {
-				current.removedLines.push(line.slice(1));
+		if (inHunkMode && current) {
+			const first = line[0];
+			if (line.length === 0 && hunk !== undefined) {
+				pendingBlanks++;
+				continue;
+			}
+			if (first !== "+" && first !== "-" && first !== " ") {
+				// Includes "\ No newline at end of file" and git metadata.
+				if (first !== "\\") hunk = undefined;
+				pendingBlanks = 0;
+				continue;
+			}
+			if (hunk === undefined) {
+				hunk = { ops: [] };
+				current.hunks.push(hunk);
+			}
+			// Blank lines are empty context lines only when the hunk continues after them.
+			for (; pendingBlanks > 0; pendingBlanks--) {
+				hunk.ops.push({ op: " ", text: "" });
+				consumeCounts(hunk, " ");
+			}
+			consumeCounts(hunk, first);
+			const text = line.slice(1);
+			if (first === "+") {
+				hunk.ops.push({ op: "+", text, addedIndex: current.addedLines.length });
+				current.addedLines.push(text);
+			} else if (first === "-") {
+				hunk.ops.push({ op: "-", text });
+				current.removedLines.push(text);
+			} else {
+				hunk.ops.push({ op: " ", text });
 			}
 		}
 	}
 
 	return files.filter((file) => file.addedLines.length > 0 || file.removedLines.length > 0);
+}
+
+function normalizeNewlines(text: string): string {
+	return text.replace(/\r\n/g, "\n");
+}
+
+/** Maximum line comparisons spent locating a hunk; beyond it the location is not reported. */
+const HUNK_SEARCH_BUDGET = 2_000_000;
+
+/** New-file line of the added line `addedIndex`, or undefined when it cannot be determined. */
+function patchFileLine(file: PatchedFile, addedIndex: number, fileText: () => Promise<string | undefined>): Promise<number | undefined> {
+	return (async () => {
+		const hunk = file.hunks.find((candidate) => candidate.ops.some((op) => op.addedIndex === addedIndex));
+		if (!hunk) return undefined;
+		const position = hunk.ops.findIndex((op) => op.addedIndex === addedIndex);
+		const newSideBefore = hunk.ops.slice(0, position).filter((op) => op.op !== "-").length;
+		if (hunk.start !== undefined) return hunk.start + newSideBefore;
+
+		const oldSide = hunk.ops.filter((op) => op.op !== "+").map((op) => op.text);
+		if (oldSide.length === 0) return undefined;
+		const text = await fileText();
+		if (text === undefined) return undefined;
+		const fileLines = normalizeNewlines(text).split("\n");
+
+		let from = 0;
+		if (hunk.anchor !== undefined) {
+			const anchorIndex = fileLines.findIndex((fileLine) => fileLine.trim() === hunk.anchor);
+			if (anchorIndex >= 0) from = anchorIndex + 1;
+		}
+		let match = -1;
+		let budget = HUNK_SEARCH_BUDGET;
+		const first = oldSide[0];
+		for (let i = from; i + oldSide.length <= fileLines.length; i++) {
+			if (fileLines[i] !== first) continue;
+			let offset = 1;
+			while (offset < oldSide.length && fileLines[i + offset] === oldSide[offset]) offset++;
+			budget -= offset;
+			if (budget < 0) return undefined;
+			if (offset === oldSide.length) {
+				if (match >= 0) return undefined;
+				match = i;
+			}
+		}
+		return match < 0 ? undefined : match + 1 + newSideBefore;
+	})();
 }
 
 // =============================================================================
@@ -614,10 +755,21 @@ export interface CommentViolation {
 
 async function readTextIfExists(path: string): Promise<string | undefined> {
 	try {
+		if (!(await stat(path)).isFile()) return undefined;
 		return await readFile(path, "utf8");
 	} catch {
 		return undefined;
 	}
+}
+
+/** Number of lines before the single occurrence of `needle`; 0 when the file is unreadable or the match is missing or ambiguous. */
+function linesBeforeUniqueMatch(text: string | undefined, needle: string): number {
+	if (text === undefined || needle.length === 0) return 0;
+	const haystack = normalizeNewlines(text);
+	const target = normalizeNewlines(needle);
+	const index = haystack.indexOf(target);
+	if (index < 0 || haystack.indexOf(target, index + 1) >= 0) return 0;
+	return haystack.slice(0, index).split("\n").length - 1;
 }
 
 async function violationInFileText(
@@ -786,7 +938,13 @@ export async function findNewSourceComments(
 					: new Set<string>();
 
 			const comment = firstNewComment(commentsForPath(newText, path), existing);
-			if (comment) return { path, line: comment.line, comment: comment.text };
+			if (comment) {
+				const offset =
+					typeof oldText === "string"
+						? linesBeforeUniqueMatch(await readTextIfExists(resolve(cwd, path)), oldText)
+						: 0;
+				return { path, line: offset + comment.line, comment: comment.text };
+			}
 		}
 
 		return undefined;
@@ -801,7 +959,11 @@ export async function findNewSourceComments(
 		for (const file of parsePatchSections(patch)) {
 			if (!isInsideProject(file.path, cwd)) continue;
 			const violation = violationInAddedText(file.path, file.addedLines, file.removedLines);
-			if (violation) return violation;
+			if (!violation) continue;
+			const fileLine = await patchFileLine(file, violation.line - 1, () =>
+				readTextIfExists(resolve(cwd, file.path)),
+			);
+			return fileLine === undefined ? violation : { ...violation, line: fileLine };
 		}
 
 		return undefined;
@@ -821,6 +983,7 @@ export function sourceCommentBlockReason(violation: CommentViolation): string {
 	return (
 		`[prevent-destructive-commands] Blocked: ${violation.path}:${violation.line} would introduce a new comment ("${preview}"). ` +
 		"Write self-documenting code without comments and move any explanation into the commit message or pull request. " +
+		"Rewording an existing comment also counts as a new one: delete it instead. " +
 		"Only shebang lines and recognized tooling directives (lint suppressions, formatter switches) are exempt."
 	);
 }

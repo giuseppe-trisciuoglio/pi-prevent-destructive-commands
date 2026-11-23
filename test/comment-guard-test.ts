@@ -561,6 +561,218 @@ runIsolatedTest(
 		);
 		rmSync(join(root, "..foo"), { recursive: true, force: true });
 
+		// ─── Reported line is the file line (issue #54) ─────────────────────
+
+		const lineRoot = join(root, "lines");
+		mkdirSync(lineRoot, { recursive: true });
+		const pyLines = Array.from({ length: 20 }, (_, i) => `v${i} = ${i}`);
+		pyLines[16] = "x = 1  # old";
+		writeFileSync(join(lineRoot, "a.py"), pyLines.join("\n") + "\n");
+		const edited = await findNewSourceComments(
+			"edit",
+			{ path: "a.py", edits: [{ oldText: "x = 1  # old", newText: "x = 1  # new" }] },
+			lineRoot,
+		);
+		assert.equal(edited?.line, 17, "a one-line edit reports the file line");
+		assert.ok(sourceCommentBlockReason(edited!).includes("a.py:17"));
+		assert.ok(sourceCommentBlockReason(edited!).includes("Rewording an existing comment"));
+
+		const multiLine = await findNewSourceComments(
+			"edit",
+			{ path: "a.py", edits: [{ oldText: "x = 1  # old", newText: "x = 1\ny = 2  # new" }] },
+			lineRoot,
+		);
+		assert.equal(multiLine?.line, 18, "a comment on the 2nd newText line reports match line + 1");
+
+		const secondEdit = await findNewSourceComments(
+			"edit",
+			{
+				path: "a.py",
+				edits: [
+					{ oldText: "v2 = 2", newText: "v2 = 3" },
+					{ oldText: "v9 = 9", newText: "v9 = 9  # c" },
+				],
+			},
+			lineRoot,
+		);
+		assert.equal(secondEdit?.line, 10, "each edits[] entry is located on its own");
+
+		const ambiguous = await findNewSourceComments(
+			"edit",
+			{ path: "a.py", edits: [{ oldText: "v1", newText: "v1  # c" }] },
+			lineRoot,
+		);
+		assert.equal(ambiguous?.line, 1, "a non-unique oldText falls back to the snippet line");
+		const missing = await findNewSourceComments(
+			"edit",
+			{ path: "a.py", edits: [{ oldText: "nope", newText: "nope  # c" }] },
+			lineRoot,
+		);
+		assert.equal(missing?.line, 1, "a missing oldText falls back to the snippet line");
+		const noFile = await findNewSourceComments(
+			"edit",
+			{ path: "gone.py", edits: [{ oldText: "a", newText: "a  # c" }] },
+			lineRoot,
+		);
+		assert.equal(noFile?.line, 1, "an unreadable file falls back to the snippet line");
+
+		const hunk = await findNewSourceComments(
+			"apply_patch",
+			{ input: "--- a/a.py\n+++ b/a.py\n@@ -15,4 +15,5 @@\n v14 = 14\n-v15 = 15\n+v15 = 16\n+# note\n v16 = 16\n" },
+			lineRoot,
+		);
+		assert.equal(hunk?.line, 17, "a unified-diff hunk header gives the file line");
+		const patchNoHeader = await findNewSourceComments(
+			"apply_patch",
+			{ input: "*** Begin Patch\n*** Update File: a.py\n@@ context\n v1 = 1\n+# note\n*** End Patch" },
+			lineRoot,
+		);
+		assert.equal(patchNoHeader?.line, 3, "a bare @@ hunk is located by its context");
+		const lineOf = async (tool: string, input: Record<string, unknown>) =>
+			(await findNewSourceComments(tool, input, lineRoot))?.line;
+		const openai = (body: string) => ({ input: `*** Begin Patch\n*** Update File: a.py\n${body}\n*** End Patch` });
+		assert.equal(await lineOf("apply_patch", openai("@@\n v2 = 2\n+# c")), 4, "bare @@ is located in the file");
+		assert.equal(
+			await lineOf("apply_patch", openai("@@ v9 = 9\n v10 = 10\n+# c")),
+			12,
+			"@@ context text narrows the search",
+		);
+		assert.equal(await lineOf("apply_patch", openai("@@\n zz = 0\n+# c")), 1, "no match falls back");
+		writeFileSync(join(lineRoot, "dup.py"), "a = 1\na = 1\n");
+		assert.equal(
+			(await findNewSourceComments("apply_patch", { input: "*** Begin Patch\n*** Update File: dup.py\n@@\n a = 1\n+# c\n*** End Patch" }, lineRoot))?.line,
+			1,
+			"an ambiguous match falls back",
+		);
+		assert.equal(
+			await lineOf("apply_patch", {
+				input: "--- a/a.py\n+++ b/a.py\n@@ -3,3 +3,4 @@\n v3 = 3\n-v4 = 4\n+v4 = 5\n\\ No newline at end of file\n+# c\n",
+			}),
+			5,
+			"a no-newline marker is not a context line",
+		);
+		assert.equal(
+			await lineOf("apply_patch", { input: "--- a/a.py\n+++ b/a.py\n@@ -3,2 +3,3 @@\n a\n--- x\n+# c\n b\n" }),
+			4,
+			"a removed line starting with -- is not a file header",
+		);
+
+		writeFileSync(join(lineRoot, "crlf.py"), "a = 1\r\nb = 2\r\nc = 3\r\n");
+		assert.equal(
+			(await findNewSourceComments("edit", { path: "crlf.py", edits: [{ oldText: "b = 2\nc = 3", newText: "b = 2\nc = 3  # c" }] }, lineRoot))?.line,
+			3,
+			"CRLF files are matched with LF oldText",
+		);
+
+		if (process.platform !== "win32") {
+			const { spawnSync } = await import("node:child_process");
+			const fifo = join(lineRoot, "pipe.py");
+			if (spawnSync("mkfifo", [fifo]).status === 0) {
+				const result = await Promise.race([
+					findNewSourceComments("edit", { path: "pipe.py", edits: [{ oldText: "a", newText: "a  # c" }] }, lineRoot),
+					new Promise<string>((resolveTimeout) => setTimeout(() => resolveTimeout("timeout"), 3000)),
+				]);
+				assert.notEqual(result, "timeout", "a FIFO target must not block the guard");
+				assert.equal((result as { line: number }).line, 1);
+			}
+		}
+		writeFileSync(join(lineRoot, "blank.py"), "a=1\n\nb=2\nc=3\n");
+		assert.equal(
+			(await findNewSourceComments("apply_patch", { input: "--- a/blank.py\n+++ b/blank.py\n@@ -1,3 +1,4 @@\n a=1\n\n b=2\n+# c\n c=3\n\n" }, lineRoot))?.line,
+			4,
+			"a stripped blank context line counts in +start numbering",
+		);
+		assert.equal(
+			(await findNewSourceComments("apply_patch", { input: "*** Begin Patch\n*** Update File: blank.py\n@@\n a=1\n\n b=2\n+# c\n c=3\n\n*** End Patch" }, lineRoot))?.line,
+			4,
+			"a stripped blank context line counts in the bare @@ search",
+		);
+		assert.equal(
+			(await findNewSourceComments("apply_patch", { input: "--- a/blank.py\n+++ b/blank.py\n@@ -1,3 +1,4 @@\n a=1\n+# c\n\n\n" }, lineRoot))?.line,
+			2,
+			"trailing blank lines shift nothing",
+		);
+		assert.equal(
+			(await findNewSourceComments("apply_patch", { input: "--- a/blank.py\n+++ b/blank.py\n@@ -0 +99999999999999999999 @@\n+# c\n" }, lineRoot))?.line,
+			1,
+			"an absurd +start falls back",
+		);
+
+		await expectAllowed(
+			"apply_patch",
+			{ input: "--- a/a.py\n+++ b/a.py\n@@ -1,1 +1,1 @@\n--- old\n+-- old\n" },
+			lineRoot,
+			"a removed '-- old' re-added unchanged is not a new comment (sql)",
+		);
+		writeFileSync(join(lineRoot, "q.sql"), "-- old\nselect 1;\n");
+		await expectAllowed(
+			"apply_patch",
+			{ input: "--- a/q.sql\n+++ b/q.sql\n@@ -1,2 +1,2 @@\n--- old\n+-- old\n select 1;\n" },
+			lineRoot,
+			"a removed '-- old' re-added unchanged is allowed",
+		);
+		await expectBlocked(
+			"apply_patch",
+			{ input: "--- a/q.sql\n+++ b/q.sql\n@@ -1,1 +1,2 @@\n select 1;\n+++ -- c\n" },
+			lineRoot,
+			"an added '+++ -- c' line is a new comment",
+		);
+		await expectBlocked(
+			"apply_patch",
+			{ input: "--- a/a.py\n+++ b/a.py\n@@ -1,1 +1,2 @@\n v0 = 0\n+++ # c\n" },
+			lineRoot,
+			"an added '+++ # c' line is a new comment",
+		);
+
+		writeFileSync(join(lineRoot, "big.py"), "x = 1\n".repeat(300_000));
+		const startedAt = Date.now();
+		const bigViolation = await findNewSourceComments(
+			"apply_patch",
+			{ input: `*** Begin Patch\n*** Update File: big.py\n@@\n${" x = 1\n".repeat(2999)} y = 2\n+# c\n*** End Patch` },
+			lineRoot,
+		);
+		assert.ok(Date.now() - startedAt < 200, `hunk search must stay bounded (${Date.now() - startedAt} ms)`);
+		assert.ok(bigViolation !== undefined);
+		writeFileSync(join(lineRoot, "a.txt"), "a\n");
+		writeFileSync(join(lineRoot, "b.py"), "b = 1\n");
+		const secondFile = await findNewSourceComments(
+			"apply_patch",
+			{ input: "--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-a\n+b\n--- a/b.py\n+++ b/b.py\n+# c\n" },
+			lineRoot,
+		);
+		assert.deepEqual([secondFile?.path, secondFile?.line], ["b.py", 1], "second file headers without @@ are headers");
+		const secondPy = await findNewSourceComments(
+			"apply_patch",
+			{ input: "--- a/a.py\n+++ b/a.py\n@@ -1 +1 @@\n-v0 = 0\n+v0 = 1\n--- a/b.py\n+++ b/b.py\n+# c\n" },
+			lineRoot,
+		);
+		assert.deepEqual([secondPy?.path, secondPy?.line], ["b.py", 1], "a first .py file does not absorb the second");
+		const wellFormed = await findNewSourceComments(
+			"apply_patch",
+			{ input: "--- a/a.py\n+++ b/a.py\n@@ -1,2 +1,2 @@\n v0 = 0\n-v1 = 1\n+v1 = 2\n--- a/b.py\n+++ b/b.py\n@@ -1 +1,2 @@\n b = 1\n+# c\n" },
+			lineRoot,
+		);
+		assert.deepEqual([wellFormed?.path, wellFormed?.line], ["b.py", 2], "a well-formed multi-file diff");
+		const truncated = await findNewSourceComments(
+			"apply_patch",
+			{ input: "--- a/a.py\n+++ b/a.py\n@@ -1,2 +1,2 @@\n-v0 = 0\n+v0 = 1\n--- a/b.py\n+++ b/b.py\n+# c\n" },
+			lineRoot,
+		);
+		assert.deepEqual([truncated?.path, truncated?.line], ["b.py", 1], "a ---/+++ pair is a header even when counts are short");
+		const bareSecond = await findNewSourceComments(
+			"apply_patch",
+			{ input: "--- a/a.txt\n+++ b/a.txt\n@@\n-a\n+b\n--- a/b.py\n+++ b/b.py\n+# c\n" },
+			lineRoot,
+		);
+		assert.equal(bareSecond?.path, "b.py", "a bare @@ hunk also ends at a ---/+++ pair");
+		await expectAllowed(
+			"apply_patch",
+			{ input: "--- a/q.sql\n+++ b/q.sql\n@@ -1,2 +1,2 @@\n--- old\n+-- old\n select 1;\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-a\n+b\n" },
+			lineRoot,
+			"a counted hunk keeps '--- old' as content and still allows the unchanged re-add",
+		);
+		rmSync(lineRoot, { recursive: true, force: true });
+
 		// ─── Tools without file text ────────────────────────────────────────
 
 		await expectAllowed("rename_refactoring", { pathInProject: "svc.ts" }, root, "renames carry no new text");
