@@ -15,6 +15,7 @@ import {
 	WRITE_REDIRECT_OPERATORS,
 } from "../config";
 import { hasGlobMagic, hasShellVariable } from "./glob";
+import { isExpandableToken, resetExpandableTokens, sliceTokens } from "../tokenizer";
 import { classifyProgramOperands, extractProgramLiterals, type ProgramLanguage } from "./program-operands";
 import { isOutsideCwd, isSkillPath, isSystemTempRoot, type PathAccess, resolvePath } from "./path-utils";
 import { type CheckResult, SAFE, block } from "./types";
@@ -541,10 +542,13 @@ function checkCommandTokens(
 			}
 		}
 
-		if (patternIndices.has(i)) continue;
+		// The shell expands `$(...)`, backticks and `${...}` in unquoted or double-quoted operands
+		// before the program runs, so such an operand is not opaque program text: analyse it generically.
+		const expands = isExpandableToken(token);
+		if (patternIndices.has(i) && !expands) continue;
 
 		const language = programIndices.get(i);
-		if (language !== undefined) {
+		if (language !== undefined && !expands) {
 			const literals = extractProgramLiterals(programText(token), language);
 			if (literals !== null) {
 				for (const literal of literals) {
@@ -624,7 +628,7 @@ function checkCommandTokens(
 
 		if (DELEGATION_COMMANDS.has(token)) {
 			if (i + 1 < tokens.length) {
-				const r = checkCommandTokens(tokens.slice(i + 1), currentCwd, depth + 1, boundaryCwd);
+				const r = checkCommandTokens(sliceTokens(tokens, i + 1), currentCwd, depth + 1, boundaryCwd);
 				if (r.dangerous) return r;
 			}
 			continue;
@@ -688,6 +692,7 @@ function checkCommandTokens(
 }
 
 export function checkCommandWorkdir(command: string, cwd: string, depth = 0): CheckResult {
+	if (depth === 0) resetExpandableTokens();
 	if (depth > MAX_NESTING_DEPTH) {
 		return block(
 			"command nesting too deep to safely analyze (possible obfuscation)",

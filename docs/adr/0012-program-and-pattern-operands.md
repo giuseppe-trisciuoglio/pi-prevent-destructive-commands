@@ -73,6 +73,50 @@ Input files and path-valued options stay unclassified and are still checked.
   outside tags is hidden and attribute paths stay checked. No shortcut skips
   the command analysis.
 
+- **Amendment (issue #53).**
+  - `node`/`bun` `--eval=`/`--print=` with the code in the next token (as the
+    tokenizer splits a quoted value) is classified as a program, like the
+    attached `--eval=CODE`. A path-like next token (`--eval= /etc/passwd`) may
+    be a script file after an empty value, so it stays unclassified and checked.
+  - The node option table lists the common value-taking options
+    (`--max-old-space-size`, `--stack-size`, `--loader`, `--env-file`,
+    `--conditions`, ...), so `-e`/`-p` after them is still found. An
+    option-like next token is not taken as the value of a node option, so
+    `-p -e CODE` and `--loader -e CODE` mark CODE.
+  - `deno eval`: `--check`, `--reload`/`-r`, `--inspect*`, `--watch` and other
+    optional-value options take no separate value token, and more boolean
+    options are known. When the token after an optional-value option is path-like
+    (`/`, `~`, `..`, `/../`), it is consumed as its value and so checked as a
+    path (`deno eval --check /etc/passwd` stays blocked). `--` ends the options
+    and the next token is the program, so it is scanned. Unknown options still
+    fall back to the generic analysis (the program is then not scanned; this
+    limitation predates #53).
+  - A separated `--opt= v` is ambiguous (an empty value followed by an operand
+    cannot be told apart from a value after tokenizing). The operands are
+    classified under both readings (the next token consumed as the value, or
+    left as an operand) and an operand is exempt only when both agree. So
+    `rg --color= foo /etc`, `rg --color= '' /etc` and `rg --color= '*' /etc/x`
+    are blocked. A quoted value written attached (`--include='*.ts'`,
+    `--color=""`) is unambiguous: the tokenizer records, per token array, which
+    quoted tokens followed an attached `--opt=` (`isAttachedValue`, kept by
+    `sliceTokens`), and such a token is always the value, so
+    `grep -r --include='*.ts' '/x/' .` stays allowed.
+  - Shell expansion: an unquoted or double-quoted operand holding `$(`, a
+    backtick or `${` is expanded by the shell before the program runs, so it is
+    not opaque program or pattern text and gets the generic analysis, for every
+    inline-program form. The tokenizer records such token texts
+    (`isExpandableToken`, reset per top-level command; a text seen expandable
+    anywhere in the command wins). Single-quoted JS template literals
+    (`node -e 'console.log(\`${x}\`)'`) stay allowed. This also closes
+    `node -e "$(cat /etc/passwd)"`.
+  - By-design blocked-to-allowed changes (the operand is now code, as with
+    `node -e '…'` before): programs without a path-like string literal passed
+    through a recognised form (`--eval`/`--print` spellings, `-p -e CODE`, `deno eval` booleans and `--`), such as `node --stack-size 1 -e 'x; cat /etc/passwd'`,
+    `node --eval='$(cat /etc/passwd)'` (single-quoted, so JS code),
+    `node -p ../x`-style programs after a value option, `deno eval --vendor '/etc/passwd'`
+    and `deno eval -- '/etc/passwd'`. Unknown-option garbage such as
+    `deno eval --reload -g --max-old-space-size '…'` no longer has its code consumed as an option value.
+
 ## Consequences
 
 - Common inspection and conflict-resolution commands no longer push agents to

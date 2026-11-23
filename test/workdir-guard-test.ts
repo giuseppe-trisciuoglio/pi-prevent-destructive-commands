@@ -183,7 +183,19 @@ case_("perl -nle 'print if /x/' /etc/passwd", true, "perl -nle input file outsid
 case_("perl -l -e 'open(F,\"/etc/x\")'", true, "perl -l -e program literal is checked");
 case_("rg --color never '/api/'", false, "rg --color value is skipped before the pattern");
 case_("rg --color never x /etc", true, "rg --color search path outside remains blocked");
-case_("grep -r --include='*.ts' '/x/' .", false, "grep --include= value split by the tokenizer");
+case_("grep -r --include='*.ts' '/x/' .", false, "grep --include= attached quoted value split by the tokenizer");
+case_("grep -rn --include='*.ts' '/api/users' src", false, "attached quoted --include value, pattern allowed");
+case_("grep --exclude-dir='node_modules' '/api/' f", false, "attached quoted --exclude-dir value");
+case_("rg --glob='*.ts' '/api/' src", false, "attached quoted rg --glob value");
+case_("rg --max-count='5' '/api/' src", false, "attached quoted rg --max-count value");
+case_("rg --color='never' '/api/' src", false, "attached quoted rg --color value");
+case_("rg --iglob='*.ts' '/x/' .", false, "attached quoted rg --iglob value");
+case_(`grep --include="*.ts" '/x/' .`, false, "attached double-quoted value");
+case_(`rg --color="" '/api/' src`, false, "attached empty value");
+case_("grep -r --include='*.ts' x /etc", true, "attached quoted value, search path outside still blocked");
+case_("grep -r --include='*.ts' '/x/' /etc", true, "attached quoted value, second operand outside still blocked");
+case_("cd . && grep -r --include='*.ts' '/x/' .", false, "attached value after a separator");
+case_("grep -r --include= '*.ts' '/x/' .", true, "separated --include= stays ambiguous");
 case_("grep -r --include='*.ts' x /etc", true, "grep --include= search path outside remains blocked");
 case_("grep --exclude-from= /etc/x y js/a.js", true, "grep empty --exclude-from= value is still checked");
 case_("grep --regexp= /etc/passwd", true, "grep empty --regexp= next token is still checked");
@@ -409,6 +421,50 @@ case_("EP=\"/etc/passwd\"; gh api /x; cat \"$EP\"", true, "assignment not feedin
 case_("gh api \"/repos/$(cat /etc/passwd)\"", true, "command substitution in endpoint");
 case_("sonar api get --data /etc/passwd /api/x", true, "sonar non-strict form not exempted");
 case_("gh pr view /etc/passwd", true, "other gh subcommands unaffected");
+
+// Issue #53: node/deno/--opt= leftovers.
+const READ_PASSWD = `require("fs").readFileSync("/etc/passwd")`;
+case_(`node --eval='${READ_PASSWD}'`, true, "node --eval= split program is scanned");
+case_(`node --print='${READ_PASSWD}'`, true, "node --print= split program is scanned");
+case_(`node --eval=${READ_PASSWD.replace(/ /g, "")}`, true, "node --eval=CODE attached is scanned");
+case_(`node -p -e '${READ_PASSWD}'`, true, "node -p -e program is scanned");
+case_(`node --print -e '${READ_PASSWD}'`, true, "node --print -e program is scanned");
+case_(`node --max-old-space-size 100 -e '${READ_PASSWD}'`, true, "node value option before -e");
+case_(`node --stack-size 1 -pe '${READ_PASSWD}'`, true, "node value option before -pe");
+case_(`node -r ./x.js -e '${READ_PASSWD}'`, true, "node -r value before -e");
+case_(`deno eval --check 'Deno.readTextFileSync("/etc/passwd")'`, true, "deno eval --check program is scanned");
+case_(`deno eval -q --no-remote 'Deno.readTextFileSync("/etc/passwd")'`, true, "deno eval booleans before program");
+case_(`deno eval --reload 'Deno.readTextFileSync("/etc/passwd")'`, true, "deno eval --reload program is scanned");
+case_("rg --color= foo /etc", true, "empty --opt= does not swallow the pattern");
+case_("grep --exclude-dir= foo /etc", true, "empty --exclude-dir= does not swallow the pattern");
+case_("rg --color= --hidden foo /etc", true, "empty --opt= before an option");
+case_("rg --color=never foo /etc", true, "attached value, path still blocked");
+case_(`node --eval='x.replace(/a/,"b")'`, false, "node --eval= split regex literal allowed");
+case_(`node --max-old-space-size 100 -e "x.replace(/a/,'b')"`, false, "node value option, regex program allowed");
+case_("node -p -e 'x.replace(/a/,1)'", false, "node -p -e regex program allowed");
+case_("deno eval --check 'x.replace(/a/,1)'", false, "deno eval --check regex program allowed");
+case_("rg --color=never '/api/' src", false, "attached empty-free value, pattern allowed");
+case_("rg --color= '' /etc", true, "empty --opt= then empty token");
+case_("rg --color= '*' /etc/x", true, "empty --opt= then glob token");
+case_("grep --exclude-dir= '' /etc/x", true, "empty --exclude-dir= then empty token");
+case_("grep --exclude-dir= 'a,b' /etc/x", true, "empty --opt= then comma list");
+// Shell expansion in program operands is analysed generically (quote-aware).
+case_(`node --eval="$(cat /etc/passwd)"`, true, "node --eval= double-quoted substitution");
+case_(`node --print="$(cat /etc/passwd)"`, true, "node --print= double-quoted substitution");
+case_("node --eval=\"${X:-/etc/passwd}\"", true, "node --eval= double-quoted parameter expansion");
+case_(`node --max-old-space-size 100 --eval "$(cat /etc/passwd)"`, true, "value option then --eval substitution");
+case_(`node -e "$(cat /etc/passwd)"`, true, "node -e double-quoted substitution");
+case_("node -e \"`cat /etc/passwd`\"", true, "node -e double-quoted backticks");
+case_(`python3 -c "$(cat /etc/passwd)"`, true, "python -c double-quoted substitution");
+case_("node -e 'console.log(`${x}`)'", false, "single-quoted JS template literal stays allowed");
+case_("node --eval='console.log(`${x}`)'", false, "single-quoted --eval= template literal stays allowed");
+// deno optional-value options.
+case_("deno eval --check /etc/passwd", true, "optional-value option followed by a path");
+case_(`deno eval --check -- 'Deno.readTextFileSync("/etc/passwd")'`, true, "program after -- is scanned");
+case_(`deno eval -q -- 'Deno.readTextFileSync("/etc/passwd")'`, true, "program after -- is scanned (boolean option)");
+case_("deno eval --reload ../../x", true, "optional-value option followed by a relative escape");
+case_("deno eval --check -- 'x.replace(/a/,1)'", false, "regex program after -- allowed");
+case_("rg --color= foo src", false, "empty --opt= with relative path allowed");
 
 if (failed > 0) {
 	console.error(`\n${failed} test(s) failed`);

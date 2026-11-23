@@ -10,6 +10,7 @@
  */
 
 import { SHELL_OPERATORS } from "../config";
+import { isAttachedValue } from "../tokenizer";
 
 /** Language of an inline program, used to extract its string literals. */
 export type ProgramLanguage = "awk" | "js" | "python" | "ruby" | "perl";
@@ -153,7 +154,20 @@ function interpreterSpec(language: ProgramLanguage, valueLetters: string, progra
 	};
 }
 
-const NODE_SPEC = interpreterSpec("js", "eprC", "ep", ["--eval", "--print", "--require", "--import", "--input-type", "--conditions"], ["--eval", "--print"]);
+const NODE_SPEC = interpreterSpec(
+	"js",
+	"eprC",
+	"ep",
+	[
+		"--eval", "--print", "--require", "--import", "--input-type", "--conditions", "--loader", "--experimental-loader",
+		"--env-file", "--max-old-space-size", "--max-semi-space-size", "--stack-size", "--stack-trace-limit",
+		"--title", "--inspect-port", "--max-http-header-size", "--watch-path", "--experimental-default-type",
+		"--disable-warning", "--redirect-warnings", "--openssl-config", "--icu-data-dir", "--dns-result-order",
+		"--unhandled-rejections", "--heapsnapshot-signal", "--diagnostic-dir", "--report-dir", "--report-signal",
+		"--secure-heap", "--secure-heap-min", "--test-reporter", "--test-name-pattern", "--cpu-prof-dir", "--heap-prof-dir",
+	],
+	["--eval", "--print"],
+);
 const PYTHON_SPEC = interpreterSpec("python", "cmWX", "c", [], []);
 const RUBY_SPEC = interpreterSpec("ruby", "erICFE", "e", [], []);
 const PERL_SPEC = interpreterSpec("perl", "eEIMmxFiC0ldD", "eE", [], []);
@@ -168,14 +182,27 @@ const PERL_NUMERIC_VALUE: Record<string, RegExp> = { l: /^[0-7]*/, "0": /^(?:x[0
 const DENO_VALUE_OPTIONS = new Set([
 	"--ext", "--import-map", "-c", "--config", "--location", "--cert", "--seed", "--log-level", "-L",
 	"--v8-flags", "--lock", "--env-file", "--tsconfig", "--node-modules-dir", "--conditions", "--preload",
-	"--import", "--inspect", "--inspect-brk", "--inspect-wait", "--reload", "-r", "--check", "--unsafely-ignore-certificate-errors",
+	"--import",
 ]);
 
 /** `deno eval` options known to take no separate value. */
 const DENO_BOOLEAN_OPTIONS = new Set([
 	"-q", "--quiet", "-A", "--allow-all", "-p", "--print", "-T", "--ts", "--no-check", "--no-remote", "--no-npm",
 	"--no-config", "--no-lock", "--cached-only", "--frozen", "--unstable", "--env", "--no-prompt",
+	// Optional values are attached with `=`, so these never take a separate value token.
+	"--check", "--reload", "-r", "--watch", "--watch-hmr", "--no-clear-screen", "--inspect", "--inspect-brk", "--inspect-wait",
+	"--unsafely-ignore-certificate-errors", "--lock-write", "--no-terminal-colors", "--no-code-cache", "--sloppy-imports",
+	"--vendor", "--no-vendor", "--check-js", "--no-npm-install", "--prefer-offline",
 ]);
+
+/** `deno eval` options whose value is optional and attached with `=`; a following path-like token is checked. */
+const DENO_OPTIONAL_VALUE_OPTIONS = new Set([
+	"--check", "--reload", "-r", "--watch", "--watch-hmr", "--inspect", "--inspect-brk", "--inspect-wait",
+	"--unsafely-ignore-certificate-errors",
+]);
+
+/** A token that looks like a filesystem path rather than program text. */
+const PATH_LIKE = /^(?:\/|~|\.\.(?:\/|$))|\/\.\.(?:\/|$)/;
 
 function isKnownDenoBoolean(option: string): boolean {
 	return DENO_BOOLEAN_OPTIONS.has(option) || /^--(?:allow|deny|unstable)-[a-z-]+$/.test(option);
@@ -188,12 +215,19 @@ function isKnownDenoBoolean(option: string): boolean {
 function skipDenoOptions(tokens: readonly string[], j: number): number {
 	while (j < tokens.length && tokens[j]!.startsWith("-") && !SHELL_OPERATORS.has(tokens[j]!)) {
 		const token = tokens[j]!;
+		// `--` ends the options: the next token is the program.
+		if (token === "--") return j + 1;
 		const eq = token.indexOf("=");
 		const option = eq > 0 ? token.slice(0, eq) : token;
 		if (!DENO_VALUE_OPTIONS.has(option) && !isKnownDenoBoolean(option)) return -1;
 		// The tokenizer splits `--opt='v'` into `--opt=` and `v`: `v` is the value.
-		if (eq > 0 && eq === token.length - 1) j++;
+		if (eq > 0 && eq === token.length - 1) {
+			if (j + 1 < tokens.length && !tokens[j + 1]!.startsWith("-")) j++;
+		}
 		else if (eq < 0 && DENO_VALUE_OPTIONS.has(option)) j++;
+		// An optional-value option may be followed by a path-like token: consume it as its value, so
+		// it stays unclassified and is checked as a path (`deno eval --check /etc/passwd`).
+		else if (eq < 0 && DENO_OPTIONAL_VALUE_OPTIONS.has(option) && j + 1 < tokens.length && PATH_LIKE.test(tokens[j + 1]!)) j++;
 		j++;
 	}
 	return j;
@@ -216,6 +250,16 @@ function specFor(command: string): { spec: ToolSpec; name: string } | null {
  * Returns `null` when the command is not a known text tool or interpreter.
  */
 export function classifyProgramOperands(tokens: readonly string[], index: number): ProgramOperandClassification | null {
+	const consume = classifyOperands(tokens, index, true);
+	if (consume === null) return null;
+	const keep = classifyOperands(tokens, index, false)!;
+	// An operand is exempt only when both readings of an ambiguous split `--opt=` agree on it.
+	const patternIndices = new Set([...consume.patternIndices].filter((index) => keep.patternIndices.has(index)));
+	const programIndices = new Map([...consume.programIndices].filter(([index, language]) => keep.programIndices.get(index) === language));
+	return { patternIndices, programIndices };
+}
+
+function classifyOperands(tokens: readonly string[], index: number, consumeSplitValue: boolean): ProgramOperandClassification | null {
 	const command = tokens[index]!;
 	const patternIndices = new Set<number>();
 	const programIndices = new Map<number, ProgramLanguage>();
@@ -267,11 +311,25 @@ export function classifyProgramOperands(tokens: readonly string[], index: number
 			const eq = token.indexOf("=");
 			const option = eq > 0 ? token.slice(0, eq) : token;
 			if (spec.suppliesProgram(option)) supplied = true;
-			if (eq > 0 && eq === token.length - 1 && spec.longValueOptions.has(option) && j + 1 < tokens.length) {
+			const nextToken = j + 1 < tokens.length ? tokens[j + 1]! : undefined;
+			if (eq > 0 && eq === token.length - 1 && name === "node" && spec.longPatternOptions.has(option)) {
+				// `--eval='code'` is split into `--eval=` and `code`: the next token is the program.
+				// A path-like next token (`--eval= /etc/passwd`) may be a script file after an empty value:
+				// it stays unclassified, so it is checked as a path.
+				if (nextToken !== undefined && nextToken !== "" && !nextToken.startsWith("-") && !PATH_LIKE.test(nextToken) && !SHELL_OPERATORS.has(nextToken)) {
+					programIndices.set(j + 1, "js");
+					j++;
+				}
+				continue;
+			}
+			if (eq > 0 && eq === token.length - 1 && spec.longValueOptions.has(option) && nextToken !== undefined) {
 				// The tokenizer splits `--include='*.ts'` into `--include=` and `*.ts`: the next token is
 				// the value. It is left unclassified (still checked as a path), since `--regexp= /x`
-				// cannot be told apart from it.
-				j++;
+				// cannot be told apart from it (`rg --color= foo /etc` has an empty value). Both readings are
+				// classified (consumed as the value, or left as an operand) and only operands exempt in both
+				// are skipped. An option-like next token is consumed only in the first reading.
+				// A quoted value written attached (`--include='*.ts'`) is unambiguous: always the value.
+				if (consumeSplitValue || isAttachedValue(tokens, j + 1)) j++;
 				continue;
 			}
 			if (eq > 0) {
@@ -279,6 +337,8 @@ export function classifyProgramOperands(tokens: readonly string[], index: number
 				continue;
 			}
 			if (spec.longValueOptions.has(option) && j + 1 < tokens.length) {
+				// node: an option-like next token is not the value (`--print -e CODE`, `--loader -e CODE`).
+				if (name === "node" && /^-./.test(tokens[j + 1]!)) continue;
 				if (spec.longPatternOptions.has(option)) markPattern(j + 1, option);
 				j++;
 			}
@@ -299,6 +359,8 @@ export function classifyProgramOperands(tokens: readonly string[], index: number
 				if (spec.suppliesProgram(letter)) supplied = true;
 				const attached = letters.slice(k + 1);
 				if (attached === "") {
+					// node `-p -e CODE`: `-p` takes an optional script, an option is not it.
+					if (name === "node" && letter === "p" && j + 1 < tokens.length && /^-./.test(tokens[j + 1]!)) break;
 					if (!optionalAttached.includes(letter) && j + 1 < tokens.length) {
 						if (spec.shortPatternLetters.includes(letter)) markPattern(j + 1, letter);
 						j++;

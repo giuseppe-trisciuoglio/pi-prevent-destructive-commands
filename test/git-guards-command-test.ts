@@ -175,6 +175,12 @@ rmSync(noFile, { recursive: true, force: true });
 		check(`${mode} → cd repo && worktree remove -f clean allowed`, isBlocked(`cd ${repo} && git worktree remove -f wt-clean`, tmpdir(), guards), false);
 		check(`${mode} → worktree remove -f missing path blocked`, isBlocked("git worktree remove -f nope", repo, guards), true);
 		check(`${mode} → worktree remove -f $VAR blocked`, isBlocked("git worktree remove -f $WT", repo, guards), true);
+		check(`${mode} → worktree remove --forc dirty blocked`, isBlocked("git worktree remove --forc wt-dirty", repo, guards), true);
+		check(`${mode} → worktree remove --f dirty blocked`, isBlocked("git worktree remove --f wt-dirty", repo, guards), true);
+		check(`${mode} → worktree remove --f clean allowed`, isBlocked("git worktree remove --f wt-clean", repo, guards), false);
+		check(`${mode} → worktree remove --fo dirty blocked`, isBlocked("git worktree remove --fo wt-dirty", repo, guards), true);
+		check(`${mode} → worktree remove --for locked blocked`, isBlocked("git worktree remove --for wt-locked", repo, guards), true);
+		check(`${mode} → worktree remove --fo clean allowed`, isBlocked("git worktree remove --fo wt-clean", repo, guards), false);
 		check(`${mode} → worktree prune allowed`, isBlocked("git worktree prune", repo, guards), false);
 	}
 
