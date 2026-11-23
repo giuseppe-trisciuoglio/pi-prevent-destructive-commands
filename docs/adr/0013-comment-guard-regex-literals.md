@@ -50,13 +50,18 @@ reported as a new comment. A plain JS helper script under `/tmp` was blocked.
 - The reported patterns (shell-quoting helpers, escapers, path globs in
   strings) no longer block writes.
 - A `/` after the `)` closing the condition of `if`/`while`/`for` starts a
-  regex literal (issue #53): the matching `(` is found by a bounded backward
-  paren count and the keyword before it is checked, so
-  `if (x) /'/.test(s); const p = 'a/*b';` is no longer a false comment. Any
-  other `)` (calls, grouping, `o.if(x)`) keeps meaning a division. Remaining
-  limitation: parentheses inside strings in the condition can fool the paren
-  count, and a regex after `)` of other statements (`do ... while`, `with`) is
-  still read as a division; the line-based fallback then usually applies.
+  regex literal (issue #53), so `if (x) /'/.test(s); const p = 'a/*b';` is no
+  longer a false comment. The rule fails safe and applies only when all hold:
+  the matching `(` is found by a bounded backward paren count; the text between
+  the parentheses has no quote, backtick or `/` (strings, comments and regexes
+  could hide a paren); the keyword is a whole word and not preceded by `.`
+  (whitespace after the dot is ignored); the literal does not start with a
+  space or a closing bracket and is not followed by `/` or `*` (`if (a) / 2 // c`
+  stays a division). Otherwise the `/` keeps meaning a division, so a real
+  comment is never hidden where it was reported before. Remaining limitation:
+  a regex after `)` of other statements (`do ... while`, `with`) is still read as
+  a division, and in invalid code such as `for (x of y) /'/ ) "s)" /'/ // c` the
+  regex reading can desynchronise a later comment.
 - A desync no longer discards the real comments found before it (for example
   `let x = 1; // real` before an unclosed quote is still blocked).
 - Covered by `test/comment-guard-test.ts` (issue #49 block).

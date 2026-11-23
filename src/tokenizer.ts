@@ -11,6 +11,22 @@
 import { SHELL_OPERATORS } from "./config";
 
 /**
+ * Token texts the shell expands before the program runs: unquoted or
+ * double-quoted `$(`, `${` or a backtick (a single-quoted one is literal).
+ * Cleared by `resetExpandableTokens()` at the start of each analysis.
+ */
+const expandableTokens = new Set<string>();
+
+export function resetExpandableTokens(): void {
+	expandableTokens.clear();
+}
+
+/** Whether a token with this text was seen unquoted or double-quoted with a shell expansion. */
+export function isExpandableToken(text: string): boolean {
+	return expandableTokens.has(text);
+}
+
+/**
  * Tokenizes a shell command string into an array of tokens.
  *
  * - Single-quoted strings ('...') are preserved as-is (no escaping inside).
@@ -28,6 +44,7 @@ export function tokenize(input: string): string[] {
 
 	function flush() {
 		if (current.length > 0) {
+			if (/`|\$[({]/.test(current)) expandableTokens.add(current);
 			tokens.push(current);
 			current = "";
 		}
@@ -78,15 +95,18 @@ export function tokenize(input: string): string[] {
 			flush();
 			i++;
 			let quoted = "";
+			let expands = false;
 			while (i < input.length && input[i] !== '"') {
 				if (input[i] === "\\" && i + 1 < input.length) {
 					quoted += input[i + 1];
 					i += 2;
 				} else {
+					if (input[i] === "`" || (input[i] === "$" && (input[i + 1] === "(" || input[i + 1] === "{"))) expands = true;
 					quoted += input[i];
 					i++;
 				}
 			}
+			if (expands) expandableTokens.add(quoted);
 			tokens.push(quoted);
 			if (i < input.length) i++; // skip closing quote
 			continue;

@@ -36,7 +36,7 @@ The guard decides by what can be lost, not by the presence of a delete flag.
   refuses to drop a dirty worktree without `--force`.
 
 - **Amendment (issue #53).** `git worktree remove` treats any unambiguous
-  prefix of `--force` (`--fo`, `--for`, `--forc`) as forced, because git accepts
+  prefix of `--force`, from `--f` (`--f`, `--fo`, `--for`, `--forc`) as forced, because git accepts
   abbreviated long options. `gh pr close` scans a short-option cluster for `d`
   even when it carries an attached value (`-dRa/b`, `-dcmsg`); scanning still
   stops at the first value-taking letter, so `-Rd` stays `-R d`.

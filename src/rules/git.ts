@@ -112,8 +112,8 @@ function gitWorkingDirectory(tokens: string[], i: number, subIndex: number, cwd:
 function worktreeRemoveForced(args: string[]): boolean {
 	for (const arg of args) {
 		if (arg === "--") return false;
-		// git accepts unambiguous long-option abbreviations (`--fo`, `--for`, `--forc`).
-		if (/^--fo(r(ce?)?)?$/.test(arg)) return true;
+		// git accepts unambiguous long-option abbreviations (`--f`, `--fo`, `--for`, `--forc`).
+		if (/^--f(o(r(ce?)?)?)?$/.test(arg)) return true;
 		if (/^-[A-Za-z]+$/.test(arg) && arg.includes("f")) return true;
 	}
 	return false;

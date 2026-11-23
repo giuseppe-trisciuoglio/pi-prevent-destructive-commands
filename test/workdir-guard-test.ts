@@ -183,7 +183,9 @@ case_("perl -nle 'print if /x/' /etc/passwd", true, "perl -nle input file outsid
 case_("perl -l -e 'open(F,\"/etc/x\")'", true, "perl -l -e program literal is checked");
 case_("rg --color never '/api/'", false, "rg --color value is skipped before the pattern");
 case_("rg --color never x /etc", true, "rg --color search path outside remains blocked");
-case_("grep -r --include='*.ts' '/x/' .", false, "grep --include= value split by the tokenizer");
+case_("grep -r --include='*.ts' '/x/' .", true, "split --include= is ambiguous with an empty value: later operands are checked (issue #53)");
+case_("grep -r --include='*.ts' x .", false, "grep --include= value split by the tokenizer, relative operands");
+case_("grep -r --include=*.ts '/x/' .", false, "unsplit --include= value, pattern allowed");
 case_("grep -r --include='*.ts' x /etc", true, "grep --include= search path outside remains blocked");
 case_("grep --exclude-from= /etc/x y js/a.js", true, "grep empty --exclude-from= value is still checked");
 case_("grep --regexp= /etc/passwd", true, "grep empty --regexp= next token is still checked");
@@ -432,7 +434,26 @@ case_(`node --max-old-space-size 100 -e "x.replace(/a/,'b')"`, false, "node valu
 case_("node -p -e 'x.replace(/a/,1)'", false, "node -p -e regex program allowed");
 case_("deno eval --check 'x.replace(/a/,1)'", false, "deno eval --check regex program allowed");
 case_("rg --color=never '/api/' src", false, "attached empty-free value, pattern allowed");
-case_("grep -r --include='*.ts' '/x/' .", false, "glob value still consumed");
+case_("rg --color= '' /etc", true, "empty --opt= then empty token");
+case_("rg --color= '*' /etc/x", true, "empty --opt= then glob token");
+case_("grep --exclude-dir= '' /etc/x", true, "empty --exclude-dir= then empty token");
+case_("grep --exclude-dir= 'a,b' /etc/x", true, "empty --opt= then comma list");
+// Shell expansion in program operands is analysed generically (quote-aware).
+case_(`node --eval="$(cat /etc/passwd)"`, true, "node --eval= double-quoted substitution");
+case_(`node --print="$(cat /etc/passwd)"`, true, "node --print= double-quoted substitution");
+case_("node --eval=\"${X:-/etc/passwd}\"", true, "node --eval= double-quoted parameter expansion");
+case_(`node --max-old-space-size 100 --eval "$(cat /etc/passwd)"`, true, "value option then --eval substitution");
+case_(`node -e "$(cat /etc/passwd)"`, true, "node -e double-quoted substitution");
+case_("node -e \"`cat /etc/passwd`\"", true, "node -e double-quoted backticks");
+case_(`python3 -c "$(cat /etc/passwd)"`, true, "python -c double-quoted substitution");
+case_("node -e 'console.log(`${x}`)'", false, "single-quoted JS template literal stays allowed");
+case_("node --eval='console.log(`${x}`)'", false, "single-quoted --eval= template literal stays allowed");
+// deno optional-value options.
+case_("deno eval --check /etc/passwd", true, "optional-value option followed by a path");
+case_(`deno eval --check -- 'Deno.readTextFileSync("/etc/passwd")'`, true, "program after -- is scanned");
+case_(`deno eval -q -- 'Deno.readTextFileSync("/etc/passwd")'`, true, "program after -- is scanned (boolean option)");
+case_("deno eval --reload ../../x", true, "optional-value option followed by a relative escape");
+case_("deno eval --check -- 'x.replace(/a/,1)'", false, "regex program after -- allowed");
 case_("rg --color= foo src", false, "empty --opt= with relative path allowed");
 
 if (failed > 0) {

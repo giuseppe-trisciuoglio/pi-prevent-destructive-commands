@@ -301,6 +301,9 @@ export function extractComments(
 		return content[k] !== "'";
 	};
 
+	/** Set when the last `regexAllowedHere()` accepted a `/` only because it follows an if/while/for condition. */
+	let afterCondition = false;
+
 	/**
 	 * Whether the `)` at `close` ends the condition of `if`/`while`/`for`, after which a
 	 * `/` starts a statement (a regex literal), not a division. The matching `(` is found by
@@ -315,11 +318,15 @@ export function extractComments(
 			else if (ch === "(") {
 				depth--;
 				if (depth === 0) {
+					// Fail safe: strings, comments or regexes inside the parentheses can hide a paren.
+					if (/["'`\/]/.test(content.slice(k + 1, close))) return false;
 					let end = k - 1;
 					while (end >= 0 && /\s/.test(content[end]!)) end--;
 					let start = end;
 					while (start > 0 && /[A-Za-z0-9_$]/.test(content[start - 1]!)) start--;
-					if (start > 0 && content[start - 1] === ".") return false;
+					let before = start - 1;
+					while (before >= 0 && /\s/.test(content[before]!)) before--;
+					if (before >= 0 && content[before] === ".") return false;
 					return /^(?:if|while|for)$/.test(content.slice(start, end + 1));
 				}
 			}
@@ -329,6 +336,7 @@ export function extractComments(
 
 	/** Whether the `/` at `i` is in an expression position, so it opens a regex literal. */
 	const regexAllowedHere = (): boolean => {
+		afterCondition = false;
 		let k = i - 1;
 		while (k >= 0 && (content[k] === " " || content[k] === "\t" || content[k] === "\r" || content[k] === "\n")) k--;
 		if (k < 0) return true;
@@ -339,7 +347,10 @@ export function extractComments(
 		// `total! / n`, `f()! / n`: a TypeScript non-null assertion ends an operand.
 		if (previous === "!" && /[A-Za-z0-9_$)\]]/.test(beforePrevious)) return false;
 		if (REGEX_PRECEDING_CHARACTERS.includes(previous)) return true;
-		if (previous === ")") return closesStatementCondition(k);
+		if (previous === ")") {
+			afterCondition = closesStatementCondition(k);
+			return afterCondition;
+		}
 		if (!/[A-Za-z_$]/.test(previous)) return false;
 		let start = k;
 		while (start > 0 && /[A-Za-z0-9_$]/.test(content[start - 1]!)) start--;
@@ -432,6 +443,7 @@ export function extractComments(
 			continue;
 		}
 
+		const regexStart = i;
 		if (
 			options.regexLiterals &&
 			ch === "/" &&
@@ -439,9 +451,16 @@ export function extractComments(
 			content[i + 1] !== "*" &&
 			content[i + 1] !== ">" &&
 			regexAllowedHere() &&
+			// After a condition the literal must look like a regex: it does not start with a space or a
+			// closing bracket and is not followed by `/` or `*` (which would make it `/ 2 // comment`).
+			(!afterCondition || !/[\s)\]},;]/.test(content[i + 1] ?? " ")) &&
 			readRegexLiteral()
 		) {
-			continue;
+			if (afterCondition && (content[i] === "/" || content[i] === "*")) {
+				i = regexStart;
+			} else {
+				continue;
+			}
 		}
 
 		let consumed = false;

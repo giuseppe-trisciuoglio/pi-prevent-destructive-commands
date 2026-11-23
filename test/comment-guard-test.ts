@@ -40,6 +40,18 @@ runIsolatedTest(
 		assert.deepEqual(extractComments("if (x) /'/.test(s); const p = 'a/*b';", "c"), []);
 		assert.deepEqual(extractComments("while (f(a)) /'/.test(s); const p = 'a/*b';", "c"), []);
 		assert.deepEqual(extractComments("for (;;) /'/.test(s); const p = 'a/*b';", "c"), []);
+		// Fail safe: strings, comments or regexes inside the parentheses keep the division reading.
+		for (const source of [
+			'const n = count("for (") / total; // real comment',
+			'y = f(a, "if (") / 2 // real',
+			'x = (a + "if (") / 2; // real',
+			"x = f(a /* if ( */) / 2 // real",
+			"x = f(/if (/) / 2 // real",
+			"x = y. if (a) / 2 // real",
+			"x = y.\tfor (a) / 2 // real",
+		]) {
+			assert.ok(extractComments(source, "c").some((comment) => comment.text === "real" || comment.text === "real comment"), source);
+		}
 		// A division after another `)` stays a division, so a real trailing comment is still found.
 		assert.equal(extractComments("const r = (a + b) / 2; // note", "c").length, 1);
 		assert.equal(extractComments("const r = f(x) / 2; // note", "c").length, 1);
