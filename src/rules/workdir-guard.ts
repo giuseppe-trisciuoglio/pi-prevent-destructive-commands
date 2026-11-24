@@ -17,6 +17,7 @@ import {
 import { hasGlobMagic, hasShellVariable } from "./glob";
 import { isExpandableToken, resetExpandableTokens, sliceTokens } from "../tokenizer";
 import { classifyProgramOperands, extractProgramLiterals, type ProgramLanguage } from "./program-operands";
+import { isAbsolute } from "node:path";
 import { isOutsideCwd, isSkillPath, isSystemTempRoot, type PathAccess, resolvePath } from "./path-utils";
 import { type CheckResult, SAFE, block } from "./types";
 
@@ -403,6 +404,54 @@ export function checkPathInsideWorkdir(
 	return isOutsideCwd(p, resolveCwd, boundaryCwd, access);
 }
 
+/** `$TMPDIR` or `${TMPDIR}` (not `$TMPDIR_X` or `${TMPDIR:-x}`). */
+const TMPDIR_REFERENCE = /\$(?:TMPDIR\b|\{TMPDIR\})/g;
+
+/** `TMPDIR` written other than as `$TMPDIR`/`${TMPDIR}`: an assignment, `export`, `read`, `for … in`, `unset`, … */
+const TMPDIR_MENTION = /(?:^|[^\w${])TMPDIR\b/;
+
+/** Whether the top-level command being analysed may change `TMPDIR` (set per top-level command). */
+let tmpdirMayChange = false;
+
+/**
+ * Replaces `$TMPDIR`/`${TMPDIR}` in a bash path with the value of `TMPDIR` in the environment, the
+ * in-worktree scratch directory an orchestrator sets for its agents. Returns the expanded path, or a
+ * block when the value cannot be trusted: unset, not absolute, holding shell syntax, or possibly
+ * reassigned by the command itself. Paths of `write`/`edit`/`apply_patch` are literal and never expanded.
+ */
+function expandTmpdir(p: string): string | CheckResult {
+	TMPDIR_REFERENCE.lastIndex = 0;
+	if (!TMPDIR_REFERENCE.test(p)) return p;
+	if (tmpdirMayChange) {
+		return block(`path contains a variable that cannot be resolved statically: ${JSON.stringify(p)} (the command may change TMPDIR)`);
+	}
+	const value = process.env.TMPDIR;
+	if (!value) {
+		return block(`path contains a variable that cannot be resolved statically: ${JSON.stringify(p)} (TMPDIR is not set)`);
+	}
+	if (!isAbsolute(value) || /[$`*?[\n]/.test(value)) {
+		return block(`path contains a variable that cannot be resolved statically: ${JSON.stringify(p)} (TMPDIR is not a plain absolute path)`);
+	}
+	const directory = value.length > 1 ? value.replace(/\/+$/, "") : value;
+	return p.replace(TMPDIR_REFERENCE, () => directory);
+}
+
+/** `checkPathInsideWorkdir` for a path written in a bash command, with `$TMPDIR` expanded first. */
+function checkCommandPath(
+	p: string,
+	resolveCwd: string,
+	boundaryCwd: string,
+	access: WorkdirAccess = "read",
+): CheckResult {
+	const expanded = expandTmpdir(p);
+	if (typeof expanded !== "string") return expanded;
+	const result = checkPathInsideWorkdir(expanded, resolveCwd, boundaryCwd, access);
+	if (result.dangerous && expanded !== p) {
+		return block(`${JSON.stringify(p)} expands to ${JSON.stringify(expanded)} (TMPDIR=${process.env.TMPDIR}) — ${result.reason}`);
+	}
+	return result;
+}
+
 function addPositionals(
 	tokens: string[],
 	start: number,
@@ -571,7 +620,7 @@ function checkCommandTokens(
 				nonFileScriptIndices.add(index);
 			}
 			for (const path of operands.scriptFilePaths) {
-				const result = checkPathInsideWorkdir(path, currentCwd, boundaryCwd, "read");
+				const result = checkCommandPath(path, currentCwd, boundaryCwd, "read");
 				if (result.dangerous) return result;
 			}
 		}
@@ -596,11 +645,12 @@ function checkCommandTokens(
 			if (target === null) {
 				return block(`"cd" without a target moves to the home directory, outside the working directory`);
 			}
-			const inside = checkPathInsideWorkdir(target, currentCwd, boundaryCwd, "read");
+			const inside = checkCommandPath(target, currentCwd, boundaryCwd, "read");
 			if (inside.dangerous) {
 				return block(`"cd" leaves the working directory — ${inside.reason}`);
 			}
-			cursor.setCurrentCwd(resolvePath(target, currentCwd) ?? currentCwd);
+			const expandedTarget = expandTmpdir(target);
+			cursor.setCurrentCwd(resolvePath(typeof expandedTarget === "string" ? expandedTarget : target, currentCwd) ?? currentCwd);
 			cursor.skipTo(j);
 			continue;
 		}
@@ -642,7 +692,7 @@ function checkCommandTokens(
 
 		const atFile = atFilePaths.get(i);
 		if (atFile !== undefined) {
-			const r = checkPathInsideWorkdir(atFile, currentCwd, boundaryCwd, "read");
+			const r = checkCommandPath(atFile, currentCwd, boundaryCwd, "read");
 			if (r.dangerous) return r;
 			continue;
 		}
@@ -650,7 +700,7 @@ function checkCommandTokens(
 		if (token.startsWith("--template=")) {
 			const templatePath = token.slice("--template=".length);
 			if (templatePath) {
-				const r = checkPathInsideWorkdir(templatePath, currentCwd, boundaryCwd, "read");
+				const r = checkCommandPath(templatePath, currentCwd, boundaryCwd, "read");
 				if (r.dangerous) return r;
 			}
 			continue;
@@ -662,7 +712,7 @@ function checkCommandTokens(
 			if (FREE_TEXT_LONG_OPTIONS.has(name) || value.includes("://")) continue;
 			if (looksLikePath(value)) {
 				const access: WorkdirAccess = OUTPUT_LONG_OPTIONS.has(name) ? "redirect" : "read";
-				const r = checkPathInsideWorkdir(value, currentCwd, boundaryCwd, access);
+				const r = checkCommandPath(value, currentCwd, boundaryCwd, access);
 				if (r.dangerous) return r;
 			}
 			continue;
@@ -682,7 +732,7 @@ function checkCommandTokens(
 				: writeTargets.has(i)
 					? "write"
 					: "read";
-			const r = checkPathInsideWorkdir(token, currentCwd, boundaryCwd, access);
+			const r = checkCommandPath(token, currentCwd, boundaryCwd, access);
 			if (r.dangerous) return r;
 			continue;
 		}
@@ -692,7 +742,10 @@ function checkCommandTokens(
 }
 
 export function checkCommandWorkdir(command: string, cwd: string, depth = 0): CheckResult {
-	if (depth === 0) resetExpandableTokens();
+	if (depth === 0) {
+		resetExpandableTokens();
+		tmpdirMayChange = TMPDIR_MENTION.test(command);
+	}
 	if (depth > MAX_NESTING_DEPTH) {
 		return block(
 			"command nesting too deep to safely analyze (possible obfuscation)",

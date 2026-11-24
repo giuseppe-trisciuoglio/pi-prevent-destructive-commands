@@ -26,6 +26,9 @@ export function isExpandableToken(text: string): boolean {
 	return expandableTokens.has(text);
 }
 
+/** A double-quoted segment that is only a variable reference: `"$NAME"` or `"${NAME}"`. */
+const QUOTED_VARIABLE = /^\$(?:[A-Za-z_][A-Za-z0-9_]*|\{[A-Za-z_][A-Za-z0-9_]*\})$/;
+
 /** Per token array: indices of quoted tokens attached to a preceding `--opt=` (`--include='*.ts'`). */
 const attachedValues = new WeakMap<readonly string[], Set<number>>();
 
@@ -127,12 +130,15 @@ export function tokenize(input: string): string[] {
 		// Single-quoted string: everything until closing quote, no escaping
 		if (ch === "'" || ch === '"') {
 			const isAttached = /^-.*=$/.test(current);
+			const startsWord = current === "";
 			if (isAttached) attached.add(tokens.length + 1);
 			flush();
 			let segment = readQuoted();
 			let value = segment.text;
 			let expands = segment.expands;
-			if (isAttached) {
+			// `"$TMPDIR"/*.pid` is one word: a quoted variable is the prefix of what follows, not a separate path.
+			const isQuotedVariable = ch === '"' && startsWord && QUOTED_VARIABLE.test(value);
+			if (isAttached || isQuotedVariable) {
 				// `--opt=''/etc/x` is one shell word: the attached value is everything up to the
 				// next whitespace or operator, quoted or not, so the path is not split off.
 				while (i < input.length && !/\s/.test(input[i]!) && !startsOperator()) {
