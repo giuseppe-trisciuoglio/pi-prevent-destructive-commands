@@ -435,6 +435,20 @@ const SLASH_ONLY = /^[\s/]*$/;
 const FS_CALL = /\b(?:rm|rmSync|rmdir|rmdirSync|rmtree|rm_rf|rm_r|unlink|unlinkSync|listdir|readdir|readdirSync|scandir|walk|open|opendir|chdir|chmod|chown|remove|removedirs|truncate|writeFile|writeFileSync|readFile|readFileSync|glob|Dir|File\.\w+|FileUtils\.\w+|os\.\w+|shutil\.\w+)\s*\(?\s*$/;
 
 /** Calls whose first string argument is a regular expression, not a path. */
+/**
+ * Text ending in a string concatenation operator (`+`, `+=`; perl `.`, `.=`): a literal after it is
+ * the tail of a path built at runtime. A literal *before* `+` (`'/etc/' + n`) is a real prefix and
+ * `os.path.join(d, '/x')` restarts at `/x`, so neither is treated as a fragment. The left operand must
+ * not itself end in a quote: `'' + '/etc/x'` is a static absolute path.
+ */
+const CONCAT_OPERATOR: Record<ProgramLanguage, RegExp> = {
+	awk: /(?!)/,
+	js: /[^\s'"`+]\s*\+=?\s*$/,
+	python: /[^\s'"+]\s*\+=?\s*$/,
+	ruby: /[^\s'"`+]\s*\+=?\s*$/,
+	perl: /[^\s'"`+.]\s*[+.]=?\s*$/,
+};
+
 const REGEX_CALL = /(?:\bre\.(?:sub|subn|match|fullmatch|search|compile|findall|finditer|split)|\bRegExp|\bRegexp\.new)\s*\(\s*$/;
 
 /**
@@ -498,7 +512,9 @@ export function extractProgramLiterals(program: string, language: ProgramLanguag
 		if (!closed) return null;
 		const before = program.slice(0, i - (prefixMatch?.[1]?.length ?? 0));
 		const separator = SLASH_ONLY.test(value) && !FS_CALL.test(before);
-		if (!precededByRegexCall && !separator) literals.push(value);
+		// `d + '/x.json'` appends to a path built at runtime: the fragment is relative to it, not absolute.
+		const fragment = CONCAT_OPERATOR[language].test(before);
+		if (!precededByRegexCall && !separator) literals.push(fragment ? value.replace(/^\/+/, "") : value);
 		i = j + delimiter.length;
 	}
 	return literals;
