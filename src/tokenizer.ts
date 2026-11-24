@@ -89,6 +89,33 @@ export function tokenize(input: string): string[] {
 		return false;
 	}
 
+	function startsOperator(): boolean {
+		return SHELL_OPERATORS.has(input.slice(i, i + 2)) || SHELL_OPERATORS.has(input[i]!);
+	}
+
+	/**
+	 * Reads one quoted segment starting at `input[i]` (a `'` or `"`) and moves past its closing quote.
+	 * Single quotes keep everything literally; double quotes honour `\` escapes and may expand.
+	 */
+	function readQuoted(): { text: string; expands: boolean } {
+		const quote = input[i];
+		i++;
+		let text = "";
+		let expands = false;
+		while (i < input.length && input[i] !== quote) {
+			if (quote === '"' && input[i] === "\\" && i + 1 < input.length) {
+				text += input[i + 1];
+				i += 2;
+				continue;
+			}
+			if (quote === '"' && (input[i] === "`" || (input[i] === "$" && (input[i + 1] === "(" || input[i + 1] === "{")))) expands = true;
+			text += input[i];
+			i++;
+		}
+		if (i < input.length) i++; // skip closing quote
+		return { text, expands };
+	}
+
 	while (i < input.length) {
 		const ch = input[i];
 
@@ -98,39 +125,33 @@ export function tokenize(input: string): string[] {
 		}
 
 		// Single-quoted string: everything until closing quote, no escaping
-		if (ch === "'") {
-			if (/^-.*=$/.test(current)) attached.add(tokens.length + 1);
+		if (ch === "'" || ch === '"') {
+			const isAttached = /^-.*=$/.test(current);
+			if (isAttached) attached.add(tokens.length + 1);
 			flush();
-			i++;
-			const start = i;
-			while (i < input.length && input[i] !== "'") {
-				i++;
-			}
-			tokens.push(input.slice(start, i));
-			if (i < input.length) i++; // skip closing quote
-			continue;
-		}
-
-		// Double-quoted string: supports \ escapes
-		if (ch === '"') {
-			if (/^-.*=$/.test(current)) attached.add(tokens.length + 1);
-			flush();
-			i++;
-			let quoted = "";
-			let expands = false;
-			while (i < input.length && input[i] !== '"') {
-				if (input[i] === "\\" && i + 1 < input.length) {
-					quoted += input[i + 1];
-					i += 2;
-				} else {
-					if (input[i] === "`" || (input[i] === "$" && (input[i + 1] === "(" || input[i + 1] === "{"))) expands = true;
-					quoted += input[i];
-					i++;
+			let segment = readQuoted();
+			let value = segment.text;
+			let expands = segment.expands;
+			if (isAttached) {
+				// `--opt=''/etc/x` is one shell word: the attached value is everything up to the
+				// next whitespace or operator, quoted or not, so the path is not split off.
+				while (i < input.length && !/\s/.test(input[i]!) && !startsOperator()) {
+					if (input[i] === "'" || input[i] === '"') {
+						segment = readQuoted();
+						value += segment.text;
+						expands ||= segment.expands;
+					} else if (input[i] === "\\" && i + 1 < input.length) {
+						value += input[i + 1];
+						i += 2;
+					} else {
+						if (input[i] === "`" || (input[i] === "$" && (input[i + 1] === "(" || input[i + 1] === "{"))) expands = true;
+						value += input[i];
+						i++;
+					}
 				}
 			}
-			if (expands) expandableTokens.add(quoted);
-			tokens.push(quoted);
-			if (i < input.length) i++; // skip closing quote
+			if (expands) expandableTokens.add(value);
+			tokens.push(value);
 			continue;
 		}
 

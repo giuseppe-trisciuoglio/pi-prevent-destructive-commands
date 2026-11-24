@@ -466,6 +466,17 @@ case_("deno eval --reload ../../x", true, "optional-value option followed by a r
 case_("deno eval --check -- 'x.replace(/a/,1)'", false, "regex program after -- allowed");
 case_("rg --color= foo src", false, "empty --opt= with relative path allowed");
 
+// Issue #59: an attached quoted value followed directly by more text is one shell word.
+case_("grep --exclude-from=''/etc/x foo", true, "attached empty quote + unquoted path is one value");
+case_("rg --ignore-file=''/etc/x foo", true, "attached empty single quote + path");
+case_(`rg --ignore-file=""/etc/x foo`, true, "attached empty double quote + path");
+case_(`rg --ignore-file=''"/etc/x" foo`, true, "attached empty quote + quoted path");
+case_("rg --pre=''/etc/x foo", true, "attached empty quote + preprocessor path");
+case_("rg --ignore-file='/e'tc/x foo", true, "path split across quoted and unquoted segments");
+case_(`node --eval='fs.readFileSync("'/etc/passwd'")'`, true, "program spliced from quoted segments is scanned whole");
+case_("rg --glob='*'.ts '/api/' src", false, "joined attached glob value, pattern still allowed");
+case_("rg --ignore-file=''.ignore foo src", false, "joined attached relative value inside cwd");
+
 if (failed > 0) {
 	console.error(`\n${failed} test(s) failed`);
 	process.exit(1);
