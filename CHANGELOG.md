@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.10] - 2026-11-24
+
 ### Fixed
 
 - The workdir guard no longer reads a path fragment inside an inline program as an absolute path. In `python3 -c "open(d+'/verification.json')"`, and in the equivalent `node -e`, `ruby -e` and `perl -e` code (perl also uses `.`), a literal right after a concatenation operator is the tail of a path built at runtime. It is checked as relative, so `d+'/../../../../etc/passwd'` is still blocked. `'/etc/'+n`, `os.path.join(d, '/etc/passwd')` and `''+'/etc/passwd'` stay blocked. See issue #61 and `docs/adr/0012-program-and-pattern-operands.md`.
@@ -132,7 +134,9 @@ Cumulative entry: these changes were released across 1.2.1–1.4.7 and were not 
 - No interactive confirmation — protection works in non-interactive modes (`-p`, JSON, RPC).
 - Maximum nesting depth limit (5) to prevent obfuscation attacks.
 
-[Unreleased]: https://github.com/giuseppe-trisciuoglio/pi-prevent-destructive-commands/compare/v1.4.9...HEAD
+[Unreleased]: https://github.com/giuseppe-trisciuoglio/pi-prevent-destructive-commands/compare/v1.4.10...HEAD
+
+[1.4.10]: https://github.com/giuseppe-trisciuoglio/pi-prevent-destructive-commands/compare/v1.4.9...v1.4.10
 
 [1.4.9]: https://github.com/giuseppe-trisciuoglio/pi-prevent-destructive-commands/compare/v1.4.8...v1.4.9
 
