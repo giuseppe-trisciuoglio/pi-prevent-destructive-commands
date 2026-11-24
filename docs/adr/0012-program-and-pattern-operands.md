@@ -116,6 +116,20 @@ Input files and path-valued options stay unclassified and are still checked.
     `node -p ../x`-style programs after a value option, `deno eval --vendor '/etc/passwd'`
     and `deno eval -- '/etc/passwd'`. Unknown-option garbage such as
     `deno eval --reload -g --max-old-space-size '…'` no longer has its code consumed as an option value.
+- **Amendment (issue #59).** An attached quoted value is a whole shell word.
+  When a quote opens directly after `--opt=`, the tokenizer appends every
+  quoted or unquoted segment that follows with no whitespace or operator in
+  between to the same value token. That token is still recorded by
+  `isAttachedValue`. Before this change `--opt=''/etc/x` was tokenized as
+  `--opt=`, `` and `/etc/x`: the empty token was consumed as the value and the
+  path was never checked. It now yields `--opt=` and `/etc/x`, so
+  `grep --exclude-from=''/etc/x`, `rg --ignore-file=""/etc/x` and
+  `rg --pre=''/etc/x` are blocked. Joining happens only for attached values.
+  Elsewhere, adjacent segments stay separate tokens, because several guards rely
+  on that split (for example `git commit -m"…"`). The only blocked-to-allowed
+  change is a program spliced from adjacent segments (`node --eval='a'"/b"`).
+  Its text is now the real argument the program receives (`a/b`), and that text
+  is scanned as one program.
 - **Amendment (issue #61).** A string literal that directly follows a
   concatenation operator (`+` or `+=`, plus `.` and `.=` in perl; whitespace is
   ignored) is the tail of a path built at runtime, such as

@@ -466,6 +466,40 @@ case_("deno eval --reload ../../x", true, "optional-value option followed by a r
 case_("deno eval --check -- 'x.replace(/a/,1)'", false, "regex program after -- allowed");
 case_("rg --color= foo src", false, "empty --opt= with relative path allowed");
 
+// Issue #59: an attached quoted value followed directly by more text is one shell word.
+case_("grep --exclude-from=''/etc/x foo", true, "attached empty quote + unquoted path is one value");
+case_("rg --ignore-file=''/etc/x foo", true, "attached empty single quote + path");
+case_(`rg --ignore-file=""/etc/x foo`, true, "attached empty double quote + path");
+case_(`rg --ignore-file=''"/etc/x" foo`, true, "attached empty quote + quoted path");
+case_("rg --pre=''/etc/x foo", true, "attached empty quote + preprocessor path");
+case_("rg --ignore-file='/e'tc/x foo", true, "path split across quoted and unquoted segments");
+case_(`node --eval='fs.readFileSync("'/etc/passwd'")'`, true, "program spliced from quoted segments is scanned whole");
+case_("rg --glob='*'.ts '/api/' src", false, "joined attached glob value, pattern still allowed");
+case_("rg --ignore-file=''.ignore foo src", false, "joined attached relative value inside cwd");
+
+// Issue #60: $TMPDIR (the orchestrator's in-worktree scratch dir) is resolved from the environment.
+{
+	const savedTmpdir = process.env.TMPDIR;
+	process.env.TMPDIR = `${CWD}/.scratch`;
+	case_(`python3 lint.py > "$TMPDIR/lint.out" 2>&1`, false, "redirect into $TMPDIR inside cwd");
+	case_(`cat > "\${TMPDIR}/search.js" <<'EOF'\nconsole.log(1)\nEOF`, false, "${TMPDIR} heredoc target");
+	case_(`ls "$TMPDIR"/*.pid`, false, "quoted $TMPDIR followed by a glob is one word");
+	case_(`for f in "$TMPDIR"/*.pid; do kill $(cat "$f"); done`, false, "loop over $TMPDIR glob");
+	case_(`cd "$TMPDIR" && ls && cat a.txt`, false, "cd into $TMPDIR");
+	case_(`TMPDIR=/etc cat "$TMPDIR/passwd"`, true, "TMPDIR assigned in the command is not trusted");
+	case_(`export TMPDIR=/etc; cat "$TMPDIR/x"`, true, "TMPDIR exported in the command is not trusted");
+	case_(`cat "\${TMPDIR:-/etc}/x"`, true, "parameter expansion with a default stays unresolvable");
+	case_(`cat "$HOME/x"`, true, "other variables stay unresolvable");
+	case_(`cat "$TMPDIR/../../../../etc/passwd"`, true, "expanded path escaping the cwd is blocked");
+	case_(`cd "$TMPDIR" && cat ../../../../../etc/passwd`, true, "relative escape after cd $TMPDIR is blocked");
+	case_(`ls "$X"/*.pid`, true, "unresolvable quoted variable + glob is not read as a glob from /");
+	process.env.TMPDIR = "/home/user/other";
+	case_(`cat "$TMPDIR/x"`, true, "TMPDIR outside cwd and temp is blocked");
+	delete process.env.TMPDIR;
+	case_(`cat "$TMPDIR/x"`, true, "unset TMPDIR is blocked");
+	if (savedTmpdir === undefined) delete process.env.TMPDIR;
+	else process.env.TMPDIR = savedTmpdir;
+}
 // Issue #61: a literal after a concatenation operator is the tail of a runtime path.
 case_(`python3 -c "j=json.load(open('.agent-evidence/a/'+n+'/verification.json'))"`, false, "concatenated relative path fragment");
 case_(`python3 -c "j=json.load(open(d+'/verification.json'))"`, false, "fragment appended to a variable");
