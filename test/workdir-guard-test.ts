@@ -500,6 +500,19 @@ case_("rg --ignore-file=''.ignore foo src", false, "joined attached relative val
 	if (savedTmpdir === undefined) delete process.env.TMPDIR;
 	else process.env.TMPDIR = savedTmpdir;
 }
+// Issue #61: a literal after a concatenation operator is the tail of a runtime path.
+case_(`python3 -c "j=json.load(open('.agent-evidence/a/'+n+'/verification.json'))"`, false, "concatenated relative path fragment");
+case_(`python3 -c "j=json.load(open(d+'/verification.json'))"`, false, "fragment appended to a variable");
+case_(`python3 -c "p=d; p += '/x.json'; open(p)"`, false, "fragment appended with +=");
+case_(`node -e "fs.readFileSync(d + '/a.json')"`, false, "node fragment");
+case_(`ruby -e 'File.read(d+"/x")'`, false, "ruby fragment");
+case_(`perl -e 'open F, $d."/x"'`, false, "perl . concatenation fragment");
+case_(`python3 -c "open('/etc/'+n)"`, true, "literal before + is a real absolute prefix");
+case_(`python3 -c "open(os.path.join(d,'/etc/passwd'))"`, true, "join with an absolute argument restarts at it");
+case_(`python3 -c "open(d+'/../../../../etc/passwd')"`, true, "fragment escaping the cwd is checked as relative");
+case_(`python3 -c "open(''+'/etc/passwd')"`, true, "static concatenation of literals stays absolute");
+case_(`perl -e 'open F, ""."/etc/passwd"'`, true, "perl static concatenation stays absolute");
+case_(`python3 -c "os.system(d+' && cat /etc/passwd')"`, true, "fragment holding a command line is still analysed");
 
 if (failed > 0) {
 	console.error(`\n${failed} test(s) failed`);

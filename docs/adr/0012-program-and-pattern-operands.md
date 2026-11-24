@@ -130,6 +130,22 @@ Input files and path-valued options stay unclassified and are still checked.
   change is a program spliced from adjacent segments (`node --eval='a'"/b"`).
   Its text is now the real argument the program receives (`a/b`), and that text
   is scanned as one program.
+- **Amendment (issue #61).** A string literal that directly follows a
+  concatenation operator (`+` or `+=`, plus `.` and `.=` in perl; whitespace is
+  ignored) is the tail of a path built at runtime, such as
+  `open(d+'/verification.json')`. Its leading `/` characters are stripped and
+  the rest is checked as a relative path. So `verification.json` is not a path
+  candidate, while `d+'/../../../../etc/passwd'` is still blocked when it
+  escapes the cwd. A fragment holding whitespace and `/` is still analysed as a
+  command line. Three cases are not fragments and are checked unchanged:
+  - a literal *before* `+` (`'/etc/'+n`), which is a real absolute prefix;
+  - a `.join` argument, because `os.path.join(d, '/x')` restarts at `/x`;
+  - a literal whose left operand is itself a literal (`''+'/etc/passwd'`),
+    because that concatenation is static.
+
+  Quote-like perl/ruby literals (`q(…)`, `%q(…)`) are not treated as
+  fragments. As noted under Consequences, a left operand that is empty at
+  runtime is out of scope for a static guard.
 
 ## Consequences
 
