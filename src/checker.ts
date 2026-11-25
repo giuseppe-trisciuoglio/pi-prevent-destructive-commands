@@ -32,6 +32,7 @@ import { checkFileReading } from "./rules/file-reading";
 import { checkGh } from "./rules/gh";
 import { checkGit } from "./rules/git";
 import { checkHttpClient } from "./rules/http-client";
+import { NETWORK_GUARD_CLIENTS, checkNetworkAccess } from "./rules/network-guard";
 import { checkPathSensitive } from "./rules/path-sensitive";
 import { isOutsideCwd, resolvePath } from "./rules/path-utils";
 import { type CheckResult, SAFE, block } from "./rules/types";
@@ -41,9 +42,11 @@ export type { CheckResult };
 /** Per-call behavior toggles, resolved once per tool call from the project config. */
 export interface CheckerOptions {
 	gitGuardsEnabled: boolean;
+	/** Blocks curl/wget requests to non-loopback hosts. Defaults to `true` when omitted. */
+	networkGuardEnabled?: boolean;
 }
 
-const DEFAULT_CHECKER_OPTIONS: CheckerOptions = { gitGuardsEnabled: true };
+const DEFAULT_CHECKER_OPTIONS: CheckerOptions = { gitGuardsEnabled: true, networkGuardEnabled: true };
 
 /**
  * Heredoc-aware entry point for analyzing a raw command string.
@@ -252,6 +255,14 @@ export function checkTokens(
 			const r = checkGh(tokens, i, currentCwd ?? cwd);
 			if (r.dangerous) return r;
 			continue;
+		}
+
+		// Network guard: curl/wget requests to non-loopback hosts need the
+		// user's per-project authorization. Not a `continue`: the GitHub API
+		// check below still applies when the guard is disabled.
+		if (options.networkGuardEnabled !== false && NETWORK_GUARD_CLIENTS.has(token)) {
+			const r = checkNetworkAccess(tokens, i);
+			if (r.dangerous) return r;
 		}
 
 		// Generic HTTP clients: destructive requests to GitHub API hosts. Not a

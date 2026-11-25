@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Network guard: `curl` and `wget` requests to any host other than the loopback interface (`localhost`, `*.localhost`, `127.0.0.0/8`, `::1`, `0.0.0.0`) are blocked unless the user authorizes them for the project with `/network-guard off` or `"disableNetworkGuard": true` in `.pi/prevent-destructive-commands.json`. Private networks (`10/8`, `172.16/12`, `192.168/16`), link-local and cloud metadata addresses, unique-local IPv6, `*.local` and single-label hosts are blocked as well. Targets come from URLs, `--url`, proxy options, `--connect-to`, `--resolve` and `--doh-url`; unresolvable targets (`"$URL"`) and target files (`wget -i`, `curl -K`) are blocked. The guard follows wrappers and nested shells. The GitHub API destructive-request check stays active when the guard is disabled. See issue #65 and `docs/adr/0015-network-guard.md`.
+
 ## [1.4.10] - 2026-11-24
 
 ### Fixed

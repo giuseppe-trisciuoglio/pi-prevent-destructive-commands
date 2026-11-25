@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { checkCommand } from "../src/checker";
+import { checkCommand, type CheckerOptions } from "../src/checker";
+
+// The GitHub API checks must hold independently of the network guard, so they
+// run with it disabled (issue #65).
+const NETWORK_GUARD_OFF: CheckerOptions = { gitGuardsEnabled: true, networkGuardEnabled: false };
 
 /**
  * Effect-based table: each destructive remote effect lists every known
@@ -117,7 +121,7 @@ async function main(): Promise<void> {
 
 	for (const [effect, commands] of Object.entries(DESTRUCTIVE_EFFECTS)) {
 		for (const command of commands) {
-			const r = checkCommand(command, cwd);
+			const r = checkCommand(command, cwd, 0, cwd, NETWORK_GUARD_OFF);
 			assert.equal(r.dangerous, true, `expected block (${effect}): ${command}`);
 		}
 	}
@@ -144,12 +148,12 @@ async function main(): Promise<void> {
 		"gh pr close 1 -dRa/b",
 		"gh pr close 1 -dcmsg",
 	]) {
-		const r = checkCommand(command, cwd);
+		const r = checkCommand(command, cwd, 0, cwd, NETWORK_GUARD_OFF);
 		assert.equal(r.dangerous, true, `expected block: ${command}`);
 	}
 
 	for (const command of SAFE_COMMANDS) {
-		const r = checkCommand(command, cwd);
+		const r = checkCommand(command, cwd, 0, cwd, NETWORK_GUARD_OFF);
 		assert.equal(r.dangerous, false, `expected allow: ${command} — ${r.reason}`);
 	}
 
@@ -169,7 +173,7 @@ async function main(): Promise<void> {
 			"curl --data-binary=@del.json https://api.github.com/graphql",
 			"http POST api.github.com/graphql @del.json",
 		]) {
-			const r = checkCommand(command, dir);
+			const r = checkCommand(command, dir, 0, dir, NETWORK_GUARD_OFF);
 			assert.equal(r.dangerous, true, `expected block (payload file): ${command}`);
 		}
 		for (const command of [
@@ -177,7 +181,7 @@ async function main(): Promise<void> {
 			"gh api graphql --input read.json",
 			"curl -d @read.json https://api.github.com/graphql",
 		]) {
-			const r = checkCommand(command, dir);
+			const r = checkCommand(command, dir, 0, dir, NETWORK_GUARD_OFF);
 			assert.equal(r.dangerous, false, `expected allow (payload file): ${command} — ${r.reason}`);
 		}
 	} finally {
