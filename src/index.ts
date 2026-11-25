@@ -23,6 +23,7 @@ import { tokenize } from "./tokenizer";
 import { checkCommandWorkdir, checkToolInputWorkdir } from "./rules/workdir-guard";
 import { registerGitGuardsCommand } from "./git-guards-command";
 import { readOnlyBlockResult, registerReadOnlyCommand } from "./read-only-command";
+import { registerNetworkGuardCommand } from "./network-guard-command";
 import { registerWorkdirGuardCommand } from "./workdir-guard-command";
 
 function pathsFromPatch(patch: string): string[] {
@@ -57,6 +58,7 @@ export default function (pi: ExtensionAPI) {
 	registerGitGuardsCommand(pi);
 	registerReadOnlyCommand(pi);
 	registerWorkdirGuardCommand(pi);
+	registerNetworkGuardCommand(pi);
 
 	pi.on("tool_call", async (event, ctx) => {
 		const projectConfig = ctx.cwd
@@ -172,6 +174,7 @@ export default function (pi: ExtensionAPI) {
 
 		const { dangerous, reason } = checkCommand(command, ctx.cwd, 0, ctx.cwd, {
 			gitGuardsEnabled,
+			networkGuardEnabled: !projectConfig.disableNetworkGuard,
 		});
 		if (!dangerous) return undefined;
 

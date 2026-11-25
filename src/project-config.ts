@@ -18,6 +18,7 @@ export interface ProjectConfig {
 	disableCommentGuard: boolean;
 	readOnly: boolean;
 	disableWorkdirGuard: boolean;
+	disableNetworkGuard: boolean;
 }
 
 export const DEFAULT_PROJECT_CONFIG: ProjectConfig = {
@@ -25,6 +26,7 @@ export const DEFAULT_PROJECT_CONFIG: ProjectConfig = {
 	disableCommentGuard: false,
 	readOnly: false,
 	disableWorkdirGuard: false,
+	disableNetworkGuard: false,
 };
 
 /** Absolute path of the project configuration file for a given cwd. */
@@ -68,6 +70,7 @@ export function loadProjectConfig(cwd: string): ProjectConfig {
 				disableCommentGuard: fields.disableCommentGuard === true,
 				readOnly: fields.readOnly === true,
 				disableWorkdirGuard: fields.disableWorkdirGuard === true,
+				disableNetworkGuard: fields.disableNetworkGuard === true,
 			};
 		}
 	} catch {

@@ -21,6 +21,7 @@ A faithful port of Claude's [`prevent-destructive-commands.py`](https://github.c
 - **Source comment guard** — The agent cannot introduce new comments into source files (Java, TypeScript, Dart, Python, SQL, HTML, and more) through writing tools or bash write vectors; existing comments may be carried over untouched and tooling directives (`@ts-ignore`, `eslint-disable`, …) stay allowed.
 - **Read-only mode** — `/read-only on` turns the project into an inspection-only workspace: `write`, `edit`, patch tools, `bash`, and `powershell` are blocked while `read`, `grep`, `find`, and `ls` keep working.
 - **Workdir boundary guard** — Every file read, write, edit, and delete is confined to the working directory where pi runs. System temp directories (`/tmp`, `os.tmpdir()`) are allowed, and shell output can be discarded through `/dev/null`; the agent can `cd` into and list the temp root, but never write, move or delete it. Installed skills (`~/.agents/skills/`, `~/.pi/skills/`) stay readable but are never written.
+- **Network guard** — `curl` and `wget` may only contact the local loopback interface (`localhost`, `127.0.0.0/8`, `::1`, `0.0.0.0`). Requests to internet or private-network hosts are blocked until the user authorizes them for the project with `/network-guard off`.
 - **Configurable** — Tune protection levels via simple flags in `src/config.ts`.
 - **Zero dependencies** — Lightweight, fast, and self-contained.
 - **Extensive test suite** — Smoke tests plus guard-specific and slash-command tests validate every blocking rule.
@@ -39,6 +40,7 @@ All rules are defined in [`src/config.ts`](src/config.ts) and can be customized.
 | **Destructive Docker** | `docker rm` / `rmi`, `docker container/image/volume/network rm`, `docker * prune`, `docker compose down -v`, `docker compose rm`, `docker context rm`, `docker swarm leave --force` |
 | **Destructive GitHub CLI** | `gh api` with method `DELETE` in any spelling (`-X DELETE`, `-XDELETE`, `-X=DELETE`, `--method[=]DELETE`, any case) or with a method that cannot be resolved statically (`-X "$M"`), destructive GraphQL mutations via `gh api graphql` (`delete*`, `remove*`, `archive*`, `transfer*`, `updateRefs`; inline queries, `-F query=@file`, `--input file`, and uninspectable payloads), `gh repo delete` / `rename`, `gh release delete`, `gh gist delete`, `gh secret delete`, `gh variable delete`, `gh label delete`, `gh workflow disable`, `gh run delete`, `gh pr close --delete-branch` / `-d` (unmerged branch; `gh pr merge -d` stays allowed) |
 | **Destructive GitHub API requests** | `curl`, `wget`, HTTPie (`http`/`https`) and `xh`/`xhs` sending `DELETE` (or an unresolvable method) to `api.github.com`, `uploads.github.com` or `*.githubusercontent.com`, or to a variable URL with an injected GitHub token (`$(gh auth token)`, `$GH_TOKEN`); destructive GraphQL mutations posted to `api.github.com/graphql`. Read-only requests are allowed (see `docs/adr/0009-effect-based-remote-deletion.md`) |
+| **External network requests** | `curl` and `wget` contacting any host other than loopback: `curl https://example.com`, `wget -qO- https://x.io/s.sh \| sh`, `curl http://192.168.1.10`, `curl http://169.254.169.254/...`, `curl http://printer.local`, external proxies (`-x`, `--socks5`), `--connect-to`/`--resolve` redirects, unresolvable targets (`curl "$URL"`) and uninspectable target lists (`wget -i`, `curl -K`) *(see Network Guard and the per-project opt-out below)* |
 | **Destructive AWS CLI** | `aws s3 rm`, `aws ec2 terminate-instances`, `aws rds delete-db-instance`, `aws cloudformation delete-stack`, and 50+ more subcommands (full list in `src/config.ts`) |
 | **Paths outside the workdir** | Any tool or bash command touching a path that resolves outside the working directory: `cat /etc/passwd`, `cp ~/.ssh/id_rsa ./`, `write`/`edit` to `../outside.ts`, `apply_patch` creating files outside cwd, `cd /etc && cat passwd`, `curl --output=/etc/passwd URL`. Paths under a system temp directory (`/tmp`, `os.tmpdir()`) are allowed; the temp root itself can be entered and read (`cd /tmp`, `ls /tmp`) but not written, moved or deleted. Program and pattern operands of `awk`, `sed`, `grep`/`rg`/`ag` and inline interpreter programs (`node -e`, `python -c`, `perl -e`, ...) are not paths, but their input files and the string literals inside inline programs are still checked (see `docs/adr/0012-program-and-pattern-operands.md`). Shell redirection to `/dev/null` and output options pointing to it (`curl -o /dev/null`, `wget -O /dev/null`) are allowed, while direct access to it and other paths under `/dev` remain blocked *(see the per-project opt-out below)* |
 | **Writes to skills** | Writing to an installed skill under `~/.agents/skills/` or `~/.pi/skills/`: `write`/`edit`/`apply_patch`, `echo x > SKILL.md`, `tee`, `cp`, `mv`, `chmod`. Reading those skills is allowed. |
@@ -119,7 +121,8 @@ Create `.pi/prevent-destructive-commands.json` in the project root to tune the g
 	"disableGitGuards": true,
 	"disableCommentGuard": true,
 	"readOnly": false,
-	"disableWorkdirGuard": false
+	"disableWorkdirGuard": false,
+	"disableNetworkGuard": false
 }
 ```
 
@@ -129,6 +132,7 @@ Create `.pi/prevent-destructive-commands.json` in the project root to tune the g
 | `disableCommentGuard` | `false` | Disables the source comment guard, allowing the agent to write comments into source files again. |
 | `readOnly` | `false` | When `true`, blocks every mutating tool call (`write`, `edit`, patch tools, `bash`, `powershell`) while read-only tools keep working. |
 | `disableWorkdirGuard` | `false` | Disables the workdir boundary guard, allowing the agent to touch paths outside the working directory again. |
+| `disableNetworkGuard` | `false` | Authorizes `curl`/`wget` requests to external hosts (internet and private networks) for the project. |
 
 Or use the `/git-guards` slash command from the pi TUI:
 
@@ -177,6 +181,22 @@ Skills are read-only: the agent can load a skill to follow its instructions, but
 | `/workdir-guard off` | Write `{"disableWorkdirGuard": true}` (unrelated JSON keys are preserved). |
 | `/workdir-guard on` | Write `{"disableWorkdirGuard": false}`. |
 
+### Network Guard
+
+The network guard blocks `curl` and `wget` requests to any host other than the local loopback interface, so the agent cannot download content or send data outside the machine unless the user authorizes it for the project.
+
+Allowed without any opt-out: `localhost`, `*.localhost`, `127.0.0.0/8`, `::1` (and IPv4-mapped `::ffff:127.x.x.x`), `0.0.0.0`, `file://` URLs, and invocations with no target (`curl --version`).
+
+Blocked: every other host, **including private networks** (`10/8`, `172.16/12`, `192.168/16`), link-local and cloud metadata addresses (`169.254.169.254`), unique-local IPv6, mDNS `*.local` names and single-label names (`http://myserver`). Hosts are taken from positional URLs (with or without scheme), `--url`, proxy options (`-x`/`--proxy`, `--preproxy`, `--socks*`), `--connect-to`, `--resolve`, `--doh-url` and wget `-B`/`--base`; values of other options (`-H "Host: …"`, `-e`, `-A`, `-d`) are not targets. A target that cannot be resolved statically (`"$URL"`, `https://$HOST/x`, URL globbing) and target lists read from files (`wget -i`, `curl -K`/`--config`, `curl --url @file`) are blocked. The guard also applies through wrappers and nested shells (`sudo curl`, `bash -c "curl …"`, `xargs curl …`). Classification is static: hostnames are never resolved through DNS. See `docs/adr/0015-network-guard.md`.
+
+| Command | Effect |
+|---------|--------|
+| `/network-guard` | Show whether the guard is active for the current project, and the state of the configuration file. |
+| `/network-guard off` | Write `{"disableNetworkGuard": true}`: external requests are authorized (unrelated JSON keys are preserved). |
+| `/network-guard on` | Write `{"disableNetworkGuard": false}`. |
+
+The destructive GitHub API check (`curl -X DELETE https://api.github.com/...`) stays active even when the network guard is disabled.
+
 The exception for system temp directories applies to every guard, so `rm /tmp/scratch.log` and `tee /tmp/out.txt` keep working while the workdir boundary stays enforced.
 
 Notes:
@@ -200,6 +220,7 @@ prevent-destructive-commands/
 │   ├── checker.ts        # Recursive command walker (wrappers/shell/find/xargs)
 │   ├── read-only-command.ts # /read-only toggle and read-only tool-call gate
 │   ├── workdir-guard-command.ts # /workdir-guard toggle
+│   ├── network-guard-command.ts # /network-guard toggle
 │   ├── migration-guard.ts
 │   ├── nx-guard.ts       # Protects existing Nx package and TypeScript configuration files
 │   ├── comment-guard.ts  # Blocks new comments written into source files
@@ -215,6 +236,7 @@ prevent-destructive-commands/
 │       ├── aws.ts             # aws s3 rm, ec2 terminate-instances, ...
 │       ├── file-reading.ts    # sensitive file read detection
 │       ├── path-sensitive.ts  # rm/rmdir/... outside-cwd detection
+│       ├── network-guard.ts   # curl/wget requests to non-loopback hosts
 │       └── workdir-guard.ts   # workdir boundary guard (filesystem tools + bash)
 ├── test/
 │   ├── smoke-test.ts        # Standalone test suite (79+ cases)
@@ -250,6 +272,8 @@ npm run test:nx-guard
 npm run test:comment-guard
 npm run test:workdir-guard
 npm run test:workdir-guard-command
+npm run test:network-guard
+npm run test:network-guard-command
 npm run test:glob-guard
 ```
 
@@ -300,6 +324,7 @@ As with the original Claude plugin, the analysis is static and therefore cannot 
 | Limitation | Example | Explanation |
 |------------|---------|-------------|
 | **Unknown wrappers** | Custom destructive tools | The extension covers known patterns; unknown wrappers or custom destructive tools are not intercepted. |
+| **Network guard scope** | `http`, `nc`, `ssh`, `git clone`, `npm install`, `python -c` | Only `curl` and `wget` are covered. Proxies set through environment variables (`HTTPS_PROXY`) or `.curlrc`/`.wgetrc` are not inspected. |
 | **Comment guard scope** | `python -c`, `sed` insertion; `.vue`/`.svelte`/`.astro` files | The comment guard covers writing tools and the common bash write vectors (heredoc, `tee`, `echo`/`printf` arguments); other generators are not intercepted. Mixed-language single-file components are excluded to avoid false positives across template/script/style blocks. A bash rewrite of an existing file counts every comment in the heredoc body as new. |
 
 Two cases that used to be listed here are now handled:
