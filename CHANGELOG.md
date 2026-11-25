@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-11-25
+
 ### Added
 
 - Network guard: `curl` and `wget` requests to any host other than the loopback interface (`localhost`, `*.localhost`, `127.0.0.0/8`, `::1`, `0.0.0.0`) are blocked unless the user authorizes them for the project with `/network-guard off` or `"disableNetworkGuard": true` in `.pi/prevent-destructive-commands.json`. Private networks (`10/8`, `172.16/12`, `192.168/16`), link-local and cloud metadata addresses, unique-local IPv6, `*.local` and single-label hosts are blocked as well. Targets come from URLs, `--url`, proxy options, `--connect-to`, `--resolve` and `--doh-url`; unresolvable targets (`"$URL"`) and target files (`wget -i`, `curl -K`) are blocked. The guard follows wrappers and nested shells. The GitHub API destructive-request check stays active when the guard is disabled. See issue #65 and `docs/adr/0015-network-guard.md`.
@@ -138,7 +140,9 @@ Cumulative entry: these changes were released across 1.2.1–1.4.7 and were not 
 - No interactive confirmation — protection works in non-interactive modes (`-p`, JSON, RPC).
 - Maximum nesting depth limit (5) to prevent obfuscation attacks.
 
-[Unreleased]: https://github.com/giuseppe-trisciuoglio/pi-prevent-destructive-commands/compare/v1.4.10...HEAD
+[Unreleased]: https://github.com/giuseppe-trisciuoglio/pi-prevent-destructive-commands/compare/v1.5.0...HEAD
+
+[1.5.0]: https://github.com/giuseppe-trisciuoglio/pi-prevent-destructive-commands/compare/v1.4.10...v1.5.0
 
 [1.4.10]: https://github.com/giuseppe-trisciuoglio/pi-prevent-destructive-commands/compare/v1.4.9...v1.4.10
 
